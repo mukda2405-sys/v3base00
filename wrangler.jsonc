@@ -60,10 +60,9 @@
     {
       "binding": "DB",
       "database_name": "miner-metrics",
-      "database_id": "0fe7804a-9966-496e-98f2-f8a19d295eb3"
+      "database_id": "5e9c841b-c051-4194-a4a1-2424fde4407f"
     }
   ],
-
   "analytics_engine_datasets": [
     {
       "binding": "HEARTBEATS",
