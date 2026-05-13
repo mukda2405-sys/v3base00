@@ -1,0 +1,77 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "v2web1",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-04-20",
+  "compatibility_flags": ["nodejs_compat_v2"],
+  "account_id": "9d4c649792e9a519667b23c2ed616b3b",
+
+  "workers_dev": true,
+  "preview_urls": false,
+  "triggers": {
+    "crons": ["*/1 * * * *"]
+  },
+  "limits": {
+    "cpu_ms": 300000
+  },
+  "observability": {
+    "enabled": false
+  },
+  "vars": {
+    "SANDBOX_TRANSPORT": "rpc",
+    "API_KEY": "m9jeXyoL12OKSGqIoCwauEoPS6I31YNm9jCWohvLXsWQ2ipn",
+    "REPORTER_ENDPOINT": "https://v2web1.bb-9d4.workers.dev/instances/heartbeat"
+  },
+  "containers": [
+    {
+      "class_name": "MinerSandbox",
+      "name": "miner-container",
+      "image": "./Dockerfile",
+      "instance_type": {
+        "vcpu": 4,
+        "memory_mib": 12288,
+        "disk_mb": 20000
+      },
+      "max_instances": 375,
+      "constraints": {
+        "regions": [
+          "EEUR",
+          "WEUR"
+        ],
+        "jurisdiction": "eu"
+      }
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "MINER_COORDINATOR",
+        "class_name": "MinerCoordinator"
+      },
+      {
+        "name": "MINER_CONTAINER",
+        "class_name": "MinerSandbox"
+      }
+    ]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "miner-metrics",
+      "database_id": "ee1f8046-b54f-42fb-8f96-817a49554e0e"
+    }
+  ],
+
+  "analytics_engine_datasets": [
+    {
+      "binding": "HEARTBEATS",
+      "dataset": "miner_heartbeats"
+    }
+  ],
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["MinerCoordinator", "MinerSandbox"]
+    }
+  ]
+}
