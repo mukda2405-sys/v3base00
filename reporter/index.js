@@ -15,7 +15,7 @@ const STALL_THRESHOLD = 10;
 const LIVENESS_GRACE_SEC = 300;
 let consecutiveZeroHashSamples = 0;
 
-const MAX_BUFFERED_SAMPLES = 1000;
+const MAX_BUFFERED_SAMPLES = 10;
 
 process.on("uncaughtException", (err) => {
   console.error("[reporter] UNCAUGHT EXCEPTION:", err.message);
@@ -45,6 +45,16 @@ let cachedStats = {
 let statsBatchBuffer = [];
 let lastStatsLogAt = 0;
 let lastSuccessfulPushLogAt = 0;
+
+function stableJitterMs(maxMs) {
+  const max = Math.max(0, Math.trunc(maxMs));
+  if (max <= 0) return 0;
+  let hash = 0;
+  for (let i = 0; i < INSTANCE_ID.length; i++) {
+    hash = (hash * 31 + INSTANCE_ID.charCodeAt(i)) >>> 0;
+  }
+  return hash % max;
+}
 
 function fetchXmrigApi(path, callback) {
   let settled = false;
@@ -390,8 +400,11 @@ function reportMetrics() {
   const batchSize = statsBatchBuffer.length;
   const pendingBuffer = statsBatchBuffer;
   statsBatchBuffer = [];
+  let settled = false;
 
   const requeue = (label) => {
+    if (settled) return;
+    settled = true;
     console.error(`[reporter] ${label}; requeuing ${pendingBuffer.length} samples`);
     statsBatchBuffer = pendingBuffer.concat(statsBatchBuffer).slice(-MAX_BUFFERED_SAMPLES);
   };
@@ -410,11 +423,14 @@ function reportMetrics() {
     },
     (res) => {
       if (res.statusCode === 200) {
+        settled = true;
+        res.resume();
         if (Date.now() - lastSuccessfulPushLogAt > 600000) {
           lastSuccessfulPushLogAt = Date.now();
           console.log(`[reporter] Metrics push successful (${batchSize} samples)`);
         }
       } else {
+        res.resume();
         requeue(`Metrics push failed: ${res.statusCode}`);
       }
     },
@@ -527,8 +543,21 @@ server.listen(PORT, () => {
   console.log(`[reporter] Endpoints: /health, /stats, /xmrig-summary, /logs, /pool-status`);
 });
 
-setTimeout(updateStats, 5000);
+const statsInitialDelay = Math.min(
+  Math.max(1000, STATS_INTERVAL - 1000),
+  5000 + stableJitterMs(5000),
+);
+const reportJitterWindow = Math.max(1, REPORTER_INTERVAL - 10000);
+const reportInitialDelay = REPORTER_INTERVAL <= 10000
+  ? REPORTER_INTERVAL
+  : 10000 + stableJitterMs(reportJitterWindow);
 
-setInterval(updateStats, STATS_INTERVAL);
+setTimeout(() => {
+  updateStats();
+  setInterval(updateStats, STATS_INTERVAL);
+}, statsInitialDelay);
 
-setInterval(reportMetrics, REPORTER_INTERVAL);
+setTimeout(() => {
+  reportMetrics();
+  setInterval(reportMetrics, REPORTER_INTERVAL);
+}, reportInitialDelay);

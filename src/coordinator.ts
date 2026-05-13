@@ -57,6 +57,8 @@ const ALARM_INTERVAL_MS = 250;
 const AUTO_RESTART_INTERVAL_MS = 60_000;
 const HEARTBEAT_TIMEOUT_MS = 90_000;
 const OPERATION_STUCK_TIMEOUT_MS = 5 * 60_000;
+const AUTO_INIT_INTERVAL_MS = 60_000;
+const INTERNAL_REPORTER_ENDPOINT = "http://heartbeat.internal/instances/heartbeat";
 
 const MAX_AUTO_RESTARTS = 5;
 
@@ -113,6 +115,7 @@ export class MinerCoordinator {
 
 	private instanceCache: InstanceRecord[] | null = null;
 	private schemaReady = false;
+	private lastAutoInitAt = 0;
 
 	constructor(state: DurableObjectState, env: Env) {
 		this.state = state;
@@ -168,7 +171,7 @@ export class MinerCoordinator {
 
 		this.invalidateCache();
 		try {
-			await this.autoInitialize();
+			await this.autoInitialize(true);
 			const state = await this.getState();
 
 			if (state.operation === "spawning") {
@@ -496,6 +499,12 @@ export class MinerCoordinator {
 				{ status: 400 },
 			);
 		}
+		if (pool !== DEFAULT_CONFIG.pool) {
+			return Response.json(
+				{ success: false, error: `Pool is locked to ${DEFAULT_CONFIG.pool}` },
+				{ status: 400 },
+			);
+		}
 
 		const state = await this.getState();
 		state.config.pool = pool;
@@ -580,10 +589,6 @@ export class MinerCoordinator {
 				const id = this.env.MINER_CONTAINER.idFromName(inst.containerId);
 				const container = this.env.MINER_CONTAINER.get(id);
 
-				const reporterEndpoint = this.env.REPORTER_ENDPOINT;
-				if (!reporterEndpoint) {
-					throw new Error("REPORTER_ENDPOINT is not configured");
-				}
 				await withTimeout(
 					container.setEnvVars({
 						INSTANCE_ID: inst.containerId,
@@ -592,7 +597,7 @@ export class MinerCoordinator {
 						MINER_WALLET: config.wallet,
 						MINER_ALGORITHM: config.algorithm,
 						MINER_WORKER_NAME: `${config.workerPrefix}-${inst.id}`,
-						REPORTER_ENDPOINT: reporterEndpoint,
+						REPORTER_ENDPOINT: INTERNAL_REPORTER_ENDPOINT,
 					}),
 					SET_ENV_TIMEOUT_MS,
 					`container.setEnvVars(${inst.containerId})`,
@@ -876,15 +881,20 @@ export class MinerCoordinator {
 		}
 	}
 
-	private async autoInitialize(): Promise<void> {
+	private async autoInitialize(force = false): Promise<void> {
 		await this.ensureSchema();
+		const now = Date.now();
+		if (!force && this.lastAutoInitAt > 0 && now - this.lastAutoInitAt < AUTO_INIT_INTERVAL_MS) {
+			return;
+		}
+		this.lastAutoInitAt = now;
 
 		try {
 			const stateRow = await this.env.DB.prepare(
 				"SELECT operation, updated_at FROM coordinator_state WHERE id = 'main'",
 			).first<{ operation: string | null; updated_at: number | null }>();
 			if (stateRow && stateRow.operation && stateRow.operation !== "idle") {
-				const ageMs = Date.now() - (stateRow.updated_at ?? 0);
+				const ageMs = now - (stateRow.updated_at ?? 0);
 				if (ageMs > OPERATION_STUCK_TIMEOUT_MS) {
 					log.warn(
 						{ operation: stateRow.operation, ageMs },
@@ -945,6 +955,10 @@ export class MinerCoordinator {
 				this.env.DB.prepare(
 					`CREATE INDEX IF NOT EXISTS idx_coordinator_instances_status
 					   ON coordinator_instances(status)`,
+				),
+				this.env.DB.prepare(
+					`CREATE INDEX IF NOT EXISTS idx_coordinator_instances_container_id
+					   ON coordinator_instances(container_id)`,
 				),
 				this.env.DB.prepare(
 					`CREATE INDEX IF NOT EXISTS idx_coordinator_instances_dark
@@ -1216,13 +1230,18 @@ function rowToInstance(row: Record<string, unknown>): InstanceRecord {
 }
 
 function countByStatus(instances: InstanceRecord[]): Record<string, number> {
-	return {
-		pending: instances.filter((i) => i.status === "pending").length,
-		starting: instances.filter((i) => i.status === "starting").length,
-		running: instances.filter((i) => i.status === "running").length,
-		stopping: instances.filter((i) => i.status === "stopping").length,
-		stopped: instances.filter((i) => i.status === "stopped").length,
-		failed: instances.filter((i) => i.status === "error").length,
+	const counts: Record<string, number> = {
+		pending: 0,
+		starting: 0,
+		running: 0,
+		stopping: 0,
+		stopped: 0,
+		failed: 0,
 		total: instances.length,
 	};
+	for (const instance of instances) {
+		if (instance.status === "error") counts.failed++;
+		else counts[instance.status] = (counts[instance.status] ?? 0) + 1;
+	}
+	return counts;
 }

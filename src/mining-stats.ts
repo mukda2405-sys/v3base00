@@ -41,7 +41,7 @@ type D1Like = D1Database | D1DatabaseSession;
 const STALE_INSTANCE_MS = 10 * 60 * 1000;
 const STATUS_REPORT_RETENTION_HOURS = 168;
 const HOURLY_STATS_RETENTION_DAYS = 30;
-const STATEMENT_LIMIT = 8;
+const STATEMENT_LIMIT = 25;
 
 let schemaReady = false;
 

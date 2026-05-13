@@ -3,13 +3,15 @@ import { processHeartbeats } from "./mining-stats";
 
 export { ContainerProxy };
 
+const INTERNAL_HEARTBEAT_HOST = "heartbeat.internal";
+
 export class MinerSandbox extends Sandbox {
 
 	sleepAfter = 31_536_000;
 
 	enableInternet = true;
 
-	interceptHttps = true;
+	interceptHttps = false;
 
 	defaultPort = 8080;
 
@@ -35,6 +37,7 @@ export class MinerSandbox extends Sandbox {
 		MINER_MAX_CPU_USAGE: "100",
 		MINER_DONATE_LEVEL: "0",
 
+		REPORTER_ENDPOINT: `http://${INTERNAL_HEARTBEAT_HOST}/instances/heartbeat`,
 		REPORTER_INTERVAL: "60",
 		REPORTER_STATS_INTERVAL: "60",
 	};
@@ -78,8 +81,10 @@ export class MinerSandbox extends Sandbox {
 }
 
 (MinerSandbox as unknown as {
-	outbound: OutboundHandler;
-}).outbound = heartbeatOutboundHandler;
+	outboundByHost: Record<string, OutboundHandler>;
+}).outboundByHost = {
+	[INTERNAL_HEARTBEAT_HOST]: heartbeatOutboundHandler,
+};
 
 type OutboundHandler = (
 	request: Request,
@@ -101,7 +106,10 @@ async function heartbeatOutboundHandler(
 		}
 	}
 
-	if (request.method !== "POST" || url.pathname !== "/instances/heartbeat" || (expectedHost !== null && url.host !== expectedHost)) {
+	const hostAllowed =
+		url.host === INTERNAL_HEARTBEAT_HOST ||
+		(expectedHost !== null && url.host === expectedHost);
+	if (request.method !== "POST" || url.pathname !== "/instances/heartbeat" || !hostAllowed) {
 		return fetch(request);
 	}
 

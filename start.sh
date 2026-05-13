@@ -16,7 +16,7 @@ if [ -r "$SANDBOX_CA" ]; then
     export NODE_EXTRA_CA_CERTS="$SANDBOX_CA"
     echo "[start] Trusting Sandbox CA via NODE_EXTRA_CA_CERTS=$SANDBOX_CA" >> /tmp/start.log
 else
-    echo "[start] WARN: Sandbox CA not present at $SANDBOX_CA — reporter will hit public REPORTER_ENDPOINT path" >> /tmp/start.log
+    echo "[start] Sandbox CA not present at $SANDBOX_CA; continuing" >> /tmp/start.log
 fi
 
 if [ -f /app/reporter/index.js ]; then
