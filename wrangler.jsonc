@@ -17,7 +17,7 @@
     "enabled": false
   },
   "placement": {
-    "mode": "smart"
+    "hostname": "v3base02.11-07c.workers.dev"
   },
   "vars": {
     "SANDBOX_TRANSPORT": "rpc",
@@ -36,6 +36,7 @@
       },
       "max_instances": 375,
       "constraints": {
+        "tier": 1,
         "regions": [
           "EEUR",
           "WEUR"
@@ -60,7 +61,7 @@
     {
       "binding": "DB",
       "database_name": "miner-metrics",
-      "database_id": "a6609976-419a-4b7a-b796-32993bd65eef"
+      "database_id": "9964c8d1-d045-46a6-9963-f4779574c980"
     }
   ],
   "analytics_engine_datasets": [
