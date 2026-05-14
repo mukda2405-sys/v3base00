@@ -1,10 +1,10 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "vv33zzte4",
+  "name": "vv33zzte5",
   "main": "src/index.ts",
   "compatibility_date": "2026-04-20",
   "compatibility_flags": ["nodejs_compat_v2"],
-  "account_id": "4c2af9508d06bd7a033a34fce1d33b99",
+  "account_id": "c642e06b4297863ce3e17695ff0111f3",
   "workers_dev": true,
   "preview_urls": false,
   "triggers": {
@@ -19,12 +19,12 @@
   },
   "placement": {
     "mode": "targeted",
-    "hostname": "vv33zzte4.dd-4c2.workers.dev"
+    "hostname": "vv33zzte5.ee-c64.workers.dev"
   },
   "vars": {
     "SANDBOX_TRANSPORT": "rpc",
     "API_KEY": "m9jeXyoL12OKSGqIoCwauEoPS6I31YNm9jCWohvLXsWQ2ipn",
-    "REPORTER_ENDPOINT": "https://vv33zzte4.dd-4c2.workers.dev/instances/heartbeat"
+    "REPORTER_ENDPOINT": "https://vv33zzte5.ee-c64.workers.dev/instances/heartbeat"
   },
   "containers": [
     {
@@ -63,7 +63,7 @@
     {
       "binding": "DB",
       "database_name": "miner-metrics",
-      "database_id": "80f7c0cc-167e-4ee4-8d17-aa25c5e3e9e2"
+      "database_id": "0ece5448-77c2-4aa6-8150-89cfff7bc00d"
     }
   ],
 
