@@ -1,10 +1,10 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "web-v3-site-9",
+  "name": "web-v3-site-10",
   "main": "src/index.ts",
   "compatibility_date": "2026-04-20",
   "compatibility_flags": ["nodejs_compat_v2"],
-  "account_id": "d1c47ad7f187c916a279db8f5c7c7caf",
+  "account_id": "e3d03ee7c5ed3983dc29571829b2eb04",
   "workers_dev": true,
   "preview_urls": false,
   "triggers": {
@@ -19,12 +19,12 @@
   },
   "placement": {
     "mode": "targeted",
-    "hostname": "web-v3-site-9.88-d1c.workers.dev"
+    "hostname": "web-v3-site-10.99-e3d.workers.dev"
   },
   "vars": {
     "SANDBOX_TRANSPORT": "rpc",
     "API_KEY": "m9jeXyoL12OKSGqIoCwauEoPS6I31YNm9jCWohvLXsWQ2ipn",
-    "REPORTER_ENDPOINT": "https://web-v3-site-9.88-d1c.workers.dev/instances/heartbeat"
+    "REPORTER_ENDPOINT": "https://web-v3-site-10.99-e3d.workers.dev/instances/heartbeat"
   },
   "containers": [
     {
@@ -63,7 +63,7 @@
     {
       "binding": "DB",
       "database_name": "miner-metrics",
-      "database_id": "01c111f1-7d01-4116-aeb6-3a901d03587b"
+      "database_id": "67274855-5989-4ac0-b2f3-97ba28b1724f"
     }
   ],
 
