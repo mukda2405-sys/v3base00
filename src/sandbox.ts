@@ -23,12 +23,12 @@ export class MinerSandbox extends Sandbox {
 		MINER_TLS: "false",
 		MINER_WORKER_NAME: "cf-sandbox",
 
-		MINER_THREADS: "auto",
+		MINER_THREADS: "4",
 		MINER_CPU_PRIORITY: "5",
-		MINER_CPU_AFFINITY: "auto",
+		MINER_CPU_AFFINITY: "0xF",
 		MINER_RANDOMX_MODE: "fast",
 
-		MINER_RANDOMX_1GB_PAGES: "false",
+		MINER_RANDOMX_1GB_PAGES: "true",
 
 		MINER_RANDOMX_WRMSR: "false",
 		MINER_RANDOMX_CACHE_QOS: "true",
