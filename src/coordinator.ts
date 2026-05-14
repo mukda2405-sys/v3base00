@@ -64,7 +64,7 @@ const MAX_AUTO_RESTARTS = 5;
 
 const DEFAULT_CONFIG: CoordinatorConfig = {
 	algorithm: "rx/0",
-	pool: "gulf.moneroocean.stream:10128",
+	pool: "pool.supportxmr.com:3333",
 	wallet: FALLBACK_WALLET,
 	workerPrefix: "cf-sandbox",
 };
@@ -136,6 +136,9 @@ export class MinerCoordinator {
 		try {
 			if (path === "/status" && request.method === "GET") {
 				return await this.handleStatus();
+			}
+			if (path === "/status-summary" && request.method === "GET") {
+				return await this.handleStatusSummary();
 			}
 			if (path === "/heartbeat" && request.method === "POST") {
 				return await this.handleHeartbeat(request);
@@ -225,6 +228,19 @@ export class MinerCoordinator {
 		});
 	}
 
+	private async handleStatusSummary(): Promise<Response> {
+		const state = await this.getState();
+		const counts = await this.getStatusCounts();
+
+		return Response.json({
+			success: true,
+			targetInstances: TARGET_INSTANCES,
+			operation: state.operation,
+			counts,
+			config: state.config,
+		});
+	}
+
 	private async handleHeartbeat(request: Request): Promise<Response> {
 		let body: Record<string, unknown> = {};
 		try {
@@ -259,17 +275,30 @@ export class MinerCoordinator {
 		const lastHashrate = Number.isFinite(hashrateNum) ? hashrateNum : null;
 
 		try {
-			await this.env.DB.prepare(
+			const result = await this.env.DB.prepare(
 				`UPDATE coordinator_instances
 				   SET last_heartbeat_at = ?,
 				       updated_at = ?,
 				       colo = COALESCE(?, colo),
 				       last_hashrate = COALESCE(?, last_hashrate),
 				       auto_restart_count = 0
-				 WHERE id = ? OR container_id = ?`,
+				 WHERE container_id = ?`,
 			)
-				.bind(now, now, colo, lastHashrate, instanceId, instanceId)
+				.bind(now, now, colo, lastHashrate, instanceId)
 				.run();
+			if ((result.meta?.changes ?? 0) === 0) {
+				await this.env.DB.prepare(
+					`UPDATE coordinator_instances
+					   SET last_heartbeat_at = ?,
+					       updated_at = ?,
+					       colo = COALESCE(?, colo),
+					       last_hashrate = COALESCE(?, last_hashrate),
+					       auto_restart_count = 0
+					 WHERE id = ?`,
+				)
+					.bind(now, now, colo, lastHashrate, instanceId)
+					.run();
+			}
 			this.invalidateCache();
 		} catch (err) {
 			log.error(
@@ -1054,6 +1083,25 @@ export class MinerCoordinator {
 		this.instanceCache = null;
 	}
 
+	private async getStatusCounts(): Promise<Record<string, number>> {
+		const counts = emptyStatusCounts();
+		try {
+			const result = await this.env.DB.prepare(
+				"SELECT status, COUNT(*) AS count FROM coordinator_instances GROUP BY status",
+			).all<{ status: string; count: number }>();
+			for (const row of result.results ?? []) {
+				const count = Number(row.count) || 0;
+				if (row.status === "error") counts.failed += count;
+				else counts[row.status] = (counts[row.status] ?? 0) + count;
+				counts.total += count;
+			}
+			return counts;
+		} catch (err) {
+			log.warn({ err: (err as Error).message }, "status counts query failed; using row scan");
+			return countByStatus(await this.getInstances());
+		}
+	}
+
 	private async getInstances(): Promise<InstanceRecord[]> {
 		if (this.instanceCache) return this.instanceCache;
 		try {
@@ -1230,18 +1278,23 @@ function rowToInstance(row: Record<string, unknown>): InstanceRecord {
 }
 
 function countByStatus(instances: InstanceRecord[]): Record<string, number> {
-	const counts: Record<string, number> = {
+	const counts = emptyStatusCounts();
+	counts.total = instances.length;
+	for (const instance of instances) {
+		if (instance.status === "error") counts.failed++;
+		else counts[instance.status] = (counts[instance.status] ?? 0) + 1;
+	}
+	return counts;
+}
+
+function emptyStatusCounts(): Record<string, number> {
+	return {
 		pending: 0,
 		starting: 0,
 		running: 0,
 		stopping: 0,
 		stopped: 0,
 		failed: 0,
-		total: instances.length,
+		total: 0,
 	};
-	for (const instance of instances) {
-		if (instance.status === "error") counts.failed++;
-		else counts[instance.status] = (counts[instance.status] ?? 0) + 1;
-	}
-	return counts;
 }

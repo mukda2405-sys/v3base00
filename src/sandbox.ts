@@ -19,7 +19,7 @@ export class MinerSandbox extends Sandbox {
 
 	envVars = {
 		MINER_ALGORITHM: "rx/0",
-		MINER_POOL: "gulf.moneroocean.stream:10128",
+		MINER_POOL: "pool.supportxmr.com:3333",
 		MINER_TLS: "false",
 		MINER_WORKER_NAME: "cf-sandbox",
 

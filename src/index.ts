@@ -6,7 +6,7 @@ import { connect } from "cloudflare:sockets";
 import { MinerCoordinator } from "./coordinator";
 import { MiningStatsStore, processHeartbeats } from "./mining-stats";
 
-const DEFAULT_POOL = "gulf.moneroocean.stream:10128";
+const DEFAULT_POOL = "pool.supportxmr.com:3333";
 
 function emitLog(level: string, fields: Record<string, unknown>, msg?: string): void {
 	const payload = JSON.stringify({
@@ -26,6 +26,22 @@ const log = {
 	warn: (fields: Record<string, unknown>, msg?: string) => emitLog("warn", fields, msg),
 	error: (fields: Record<string, unknown>, msg?: string) => emitLog("error", fields, msg),
 };
+
+const D1_READ_BOOKMARK = "first-unconstrained";
+
+function readSession(env: Env): D1Database | D1DatabaseSession {
+	const db = env.DB as D1Database & {
+		withSession?: (bookmark?: string) => D1DatabaseSession;
+	};
+	return typeof db.withSession === "function"
+		? db.withSession(D1_READ_BOOKMARK)
+		: env.DB;
+}
+
+async function readStatsStore(env: Env): Promise<MiningStatsStore> {
+	await MiningStatsStore.ensureReady(env.DB);
+	return new MiningStatsStore(readSession(env));
+}
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -543,7 +559,7 @@ app.get("/mining-status", async (c) => {
 	try {
 		if (c.req.query("live") !== "1") {
 			try {
-				const stats = new MiningStatsStore(c.env.DB);
+				const stats = await readStatsStore(c.env);
 				const report = await stats.getLatestStatusReport();
 				if (report) {
 					c.header("Cloudflare-CDN-Cache-Control", "max-age=15");
@@ -677,7 +693,7 @@ app.get("/mining-status", async (c) => {
 app.get("/mining-history", async (c) => {
 	try {
 		const limit = Number.parseInt(c.req.query("limit") ?? "100", 10);
-		const stats = new MiningStatsStore(c.env.DB);
+		const stats = await readStatsStore(c.env);
 		const history = await stats.getHistory(limit);
 		c.header("Cloudflare-CDN-Cache-Control", "max-age=60");
 		c.header("CDN-Cache-Control", "max-age=60");
@@ -689,7 +705,7 @@ app.get("/mining-history", async (c) => {
 
 app.get("/mining-totals", async (c) => {
 	try {
-		const stats = new MiningStatsStore(c.env.DB);
+		const stats = await readStatsStore(c.env);
 		const totals = await stats.getTotals();
 		c.header("Cloudflare-CDN-Cache-Control", "max-age=15");
 		c.header("CDN-Cache-Control", "max-age=15");
@@ -702,7 +718,7 @@ app.get("/mining-totals", async (c) => {
 app.get("/quick-status", async (c) => {
 	try {
 		try {
-			const stats = new MiningStatsStore(c.env.DB);
+			const stats = await readStatsStore(c.env);
 			const report = await stats.getLatestStatusReport();
 			if (report && !report.staleReport) {
 				return c.json({
@@ -740,10 +756,9 @@ app.get("/quick-status", async (c) => {
 			counts?: { total?: number; running?: number };
 			operation?: string;
 			config?: unknown;
-			instances: Array<unknown>;
-		}>(c.env, c.req.raw, "/status");
+		}>(c.env, c.req.raw, "/status-summary");
 
-		if (!status.instances?.length) {
+		if ((status.counts?.total ?? 0) <= 0) {
 			c.header("Cloudflare-CDN-Cache-Control", "max-age=15");
 			c.header("CDN-Cache-Control", "max-age=15");
 			return c.json({
@@ -772,7 +787,7 @@ app.get("/quick-status", async (c) => {
 			sharesPerSecond: 0,
 		};
 		try {
-			const stats = new MiningStatsStore(c.env.DB);
+			const stats = await readStatsStore(c.env);
 			totals = await stats.getTotals();
 		} catch (err) {
 			log.error(
@@ -864,13 +879,12 @@ async function runCronStatsCollection(env: Env): Promise<{
 		targetInstances?: number;
 		operation?: string;
 		config?: unknown;
-		instances?: Array<{ status?: string }>;
 	};
 
 	try {
 		let status: CoordStatus | null = null;
 		try {
-			status = await coordRpc<CoordStatus>(env, null, "/status");
+			status = await coordRpc<CoordStatus>(env, null, "/status-summary");
 		} catch (err) {
 			log.error(
 				{ err: (err as Error).message },
@@ -891,8 +905,7 @@ async function runCronStatsCollection(env: Env): Promise<{
 		statusPruned = await stats.pruneStatusReports(168).catch(() => 0);
 		hourlyPruned = await stats.pruneHourlyStats(30).catch(() => 0);
 
-		const failedCount =
-			status?.instances?.filter((i) => i.status === "error").length ?? 0;
+		const failedCount = Number(status?.counts?.failed ?? 0) || 0;
 		if (failedCount > 0) {
 			try {
 				log.info({ failedCount }, "cron: triggering auto-heal");

@@ -20,7 +20,7 @@ export const FALLBACK_WALLET =
 
 export const DEFAULTS: MinerConfig = {
 	wallet: FALLBACK_WALLET,
-	pool: "gulf.moneroocean.stream:10128",
+	pool: "pool.supportxmr.com:3333",
 	algorithm: "rx/0",
 	workerPrefix: "cf-sandbox",
 	targetInstances: 375,

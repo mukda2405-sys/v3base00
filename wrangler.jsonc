@@ -1,28 +1,30 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "v3base03",
+  "name": "v2web1",
   "main": "src/index.ts",
   "compatibility_date": "2026-04-20",
   "compatibility_flags": ["nodejs_compat_v2"],
-  "account_id": "1b01d67b1fd14413af08b8db74ecb02e",
+  "account_id": "9d4c649792e9a519667b23c2ed616b3b",
+
   "workers_dev": true,
   "preview_urls": false,
   "triggers": {
     "crons": ["*/1 * * * *"]
   },
   "limits": {
-    "cpu_ms": 300000
+    "cpu_ms": 300000,
+    "subrequests": 10000
+  },
+  "placement": {
+    "mode": "smart"
   },
   "observability": {
     "enabled": false
   },
-  "placement": {
-    "hostname": "v3base03.22-1b0.workers.dev"
-  },
   "vars": {
     "SANDBOX_TRANSPORT": "rpc",
     "API_KEY": "m9jeXyoL12OKSGqIoCwauEoPS6I31YNm9jCWohvLXsWQ2ipn",
-    "REPORTER_ENDPOINT": "https://v3base03.22-1b0.workers.dev/instances/heartbeat"
+    "REPORTER_ENDPOINT": "https://v2web1.bb-9d4.workers.dev/instances/heartbeat"
   },
   "containers": [
     {
@@ -35,8 +37,9 @@
         "disk_mb": 20000
       },
       "max_instances": 375,
+      "rollout_active_grace_period": 900,
+      "rollout_step_percentage": 5,
       "constraints": {
-        "tier": 1,
         "regions": [
           "EEUR",
           "WEUR"
@@ -61,9 +64,10 @@
     {
       "binding": "DB",
       "database_name": "miner-metrics",
-      "database_id": "22f26dd3-4967-4cc9-9acf-786b397f0142"
+      "database_id": "ee1f8046-b54f-42fb-8f96-817a49554e0e"
     }
   ],
+
   "analytics_engine_datasets": [
     {
       "binding": "HEARTBEATS",

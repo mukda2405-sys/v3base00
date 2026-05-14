@@ -79,11 +79,11 @@ if [ "${MINER_TLS:-false}" = "true" ]; then
 	TLS_FLAG="--tls"
 fi
 
-echo "[start] Starting XMRig with primary pool: ${MINER_POOL:-gulf.moneroocean.stream:10128} tls=${MINER_TLS:-false} (no fallback)" >> /tmp/start.log
+echo "[start] Starting XMRig with primary pool: ${MINER_POOL:-pool.supportxmr.com:3333} tls=${MINER_TLS:-false} (no fallback)" >> /tmp/start.log
 
 xmrig \
 	--algo="${MINER_ALGORITHM:-rx/0}" \
-	--url="${MINER_POOL:-gulf.moneroocean.stream:10128}" \
+	--url="${MINER_POOL:-pool.supportxmr.com:3333}" \
 	--user="${WALLET}" \
 	--pass="x" \
 	--rig-id="${WORKER}" \

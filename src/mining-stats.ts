@@ -48,6 +48,10 @@ let schemaReady = false;
 export class MiningStatsStore {
 	constructor(private readonly db: D1Like) {}
 
+	static async ensureReady(db: D1Like): Promise<void> {
+		await ensureSchema(db);
+	}
+
 	async recordStats(payload: MiningStatsPayload): Promise<void> {
 		await this.recordStatsBatch([payload]);
 	}
