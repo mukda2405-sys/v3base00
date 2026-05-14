@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "v3base01",
+  "name": "v3base02",
   "main": "src/index.ts",
   "compatibility_date": "2026-04-20",
   "compatibility_flags": ["nodejs_compat_v2"],
@@ -19,12 +19,12 @@
   },
   "placement": {
     "mode": "targeted",
-    "hostname": "v3base01.22-1b0.workers.dev"
+    "hostname": "v3base02.11-07c.workers.dev"
   },
   "vars": {
     "SANDBOX_TRANSPORT": "rpc",
     "API_KEY": "m9jeXyoL12OKSGqIoCwauEoPS6I31YNm9jCWohvLXsWQ2ipn",
-    "REPORTER_ENDPOINT": "https://v3base01.22-1b0.workers.dev/instances/heartbeat"
+    "REPORTER_ENDPOINT": "https://v3base02.11-07c.workers.dev/instances/heartbeat"
   },
   "containers": [
     {
@@ -65,7 +65,7 @@
     {
       "binding": "DB",
       "database_name": "miner-metrics",
-      "database_id": "5956454c-2f99-4655-adc8-78c06bb70e94"
+      "database_id": "1c2d91cf-a9a6-4c94-ac26-21ead515d87b"
     }
   ],
 
