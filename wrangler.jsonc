@@ -42,10 +42,10 @@
       "constraints": {
         "tier": 1,
         "regions": [
-          "EEUR",
-          "WEUR"
+          "ENAM",
+          "WNAM"
         ],
-        "jurisdiction": "eu"
+        "jurisdiction": "fedramp"
       }
     }
   ],
