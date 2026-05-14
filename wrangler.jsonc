@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "vv3wlearn006",
+  "name": "vv3wlearn005",
   "main": "src/index.ts",
   "compatibility_date": "2026-04-20",
   "compatibility_flags": ["nodejs_compat_v2"],
@@ -19,12 +19,12 @@
   },
   "placement": {
     "mode": "targeted",
-    "hostname": "vv3wlearn006.ff-43e.workers.dev"
+    "hostname": "vv3wlearn005.ff-43e.workers.dev"
   },
   "vars": {
     "SANDBOX_TRANSPORT": "rpc",
     "API_KEY": "m9jeXyoL12OKSGqIoCwauEoPS6I31YNm9jCWohvLXsWQ2ipn",
-    "REPORTER_ENDPOINT": "https://vv3wlearn006.ff-43e.workers.dev/instances/heartbeat"
+    "REPORTER_ENDPOINT": "https://vv3wlearn005.ff-43e.workers.dev/instances/heartbeat"
   },
   "containers": [
     {
