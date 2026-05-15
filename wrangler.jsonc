@@ -42,8 +42,10 @@
       "constraints": {
         "tier": 1,
         "regions": [
-          "SAM"
-        ]
+          "EEUR",
+          "WEUR"
+        ],
+        "jurisdiction": "eu"
       }
     }
   ],
