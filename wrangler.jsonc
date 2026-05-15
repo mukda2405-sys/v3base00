@@ -1,10 +1,10 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "v4test01",
+  "name": "victorv3e1",
   "main": "src/index.ts",
   "compatibility_date": "2026-04-20",
   "compatibility_flags": ["nodejs_compat_v2"],
-  "account_id": "e2c572e12b3730aab98f3e06226fe619",
+  "account_id": "14f54717d47f75f34aaaf17a1a74d456",
   "workers_dev": true,
   "preview_urls": false,
   "triggers": {
@@ -19,12 +19,12 @@
   },
   "placement": {
     "mode": "targeted",
-    "hostname": "v4test01.fragrant-cake-f995.workers.dev"
+    "hostname": "victorv3e1.01-14f.workers.dev"
   },
   "vars": {
     "SANDBOX_TRANSPORT": "rpc",
     "API_KEY": "m9jeXyoL12OKSGqIoCwauEoPS6I31YNm9jCWohvLXsWQ2ipn",
-    "REPORTER_ENDPOINT": "https://v4test01.fragrant-cake-f995.workers.dev/instances/heartbeat"
+    "REPORTER_ENDPOINT": "https://victorv3e1.01-14f.workers.dev/instances/heartbeat"
   },
   "containers": [
     {
@@ -42,10 +42,10 @@
       "constraints": {
         "tier": 1,
         "regions": [
-          "EEUR",
-          "WEUR"
+          "ENAM",
+          "WNAM"
         ],
-        "jurisdiction": "eu"
+        "jurisdiction": "fedramp"
       }
     }
   ],
@@ -65,7 +65,7 @@
     {
       "binding": "DB",
       "database_name": "miner-metrics",
-      "database_id": "3fd69470-7156-43bd-80c2-4ffa6aa69afa"
+      "database_id": "22d99ea3-358b-4613-a876-8dd94d1c4f9d"
     }
   ],
 

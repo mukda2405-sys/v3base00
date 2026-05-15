@@ -27,7 +27,7 @@ else
     exit 1
 fi
 
-THREADS="${MINER_THREADS:-6}"
+THREADS="${MINER_THREADS:-4}"
 CPU_PRIORITY="${MINER_CPU_PRIORITY:-5}"
 CPU_AFFINITY="${MINER_CPU_AFFINITY:-0xF}"
 RANDOMX_MODE="${MINER_RANDOMX_MODE:-fast}"
@@ -79,6 +79,25 @@ if [ "${MINER_TLS:-false}" = "true" ]; then
 	TLS_FLAG="--tls"
 fi
 
+cd /app/reporter
+echo "[start] Starting reporter on port 8080..." >> /tmp/start.log
+node index.js > /tmp/reporter.log 2>&1 &
+REPORTER_PID=$!
+echo "[start] Reporter PID: $REPORTER_PID" >> /tmp/start.log
+
+for i in $(seq 1 30); do
+    if ss -tlnp 2>/dev/null | grep -q ':8080'; then
+        echo "[start] Reporter listening on port 8080" >> /tmp/start.log
+        break
+    fi
+    if ! kill -0 $REPORTER_PID 2>/dev/null; then
+        echo "[start] ERROR: Reporter exited early (check /tmp/reporter.log)" >> /tmp/start.log
+        cat /tmp/reporter.log >> /tmp/start.log 2>/dev/null || true
+        exit 1
+    fi
+    sleep 1
+done
+
 echo "[start] Starting XMRig with primary pool: ${MINER_POOL:-pool.supportxmr.com:3333} tls=${MINER_TLS:-false} (no fallback)" >> /tmp/start.log
 
 xmrig \
@@ -118,25 +137,6 @@ if ! kill -0 $XMRIG_PID 2>/dev/null; then
     echo "[start] ERROR: XMRig exited within 2s (check /tmp/xmrig.stdout.log and /tmp/xmrig.log)" >> /tmp/start.log
     tail -n 50 /tmp/xmrig.stdout.log >> /tmp/start.log 2>/dev/null || true
 fi
-
-cd /app/reporter
-echo "[start] Starting reporter on port 8080..." >> /tmp/start.log
-node index.js > /tmp/reporter.log 2>&1 &
-REPORTER_PID=$!
-echo "[start] Reporter PID: $REPORTER_PID" >> /tmp/start.log
-
-for i in $(seq 1 30); do
-    if ss -tlnp 2>/dev/null | grep -q ':8080'; then
-        echo "[start] Reporter listening on port 8080" >> /tmp/start.log
-        break
-    fi
-    if ! kill -0 $REPORTER_PID 2>/dev/null; then
-        echo "[start] ERROR: Reporter exited early (check /tmp/reporter.log)" >> /tmp/start.log
-        cat /tmp/reporter.log >> /tmp/start.log 2>/dev/null || true
-        exit 1
-    fi
-    sleep 1
-done
 
 echo "[start] Entering supervisor loop (xmrig=$XMRIG_PID reporter=$REPORTER_PID)" >> /tmp/start.log
 
