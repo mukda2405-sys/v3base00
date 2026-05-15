@@ -48,6 +48,7 @@ function strEnv(raw: string | undefined, fallback: string): string {
 }
 
 export class ConfigManager {
+
 	static fromEnv(env: Env): MinerConfig {
 		return {
 			wallet: strEnv(env.MINER_WALLET, DEFAULTS.wallet),

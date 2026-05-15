@@ -1,4 +1,3 @@
-
 export interface MiningStatsPayload {
 	timestamp: number;
 	instanceId?: string;
@@ -567,6 +566,7 @@ export async function processHeartbeats(
 ): Promise<void> {
 	if (payloads.length === 0) return;
 
+	const failures: string[] = [];
 	const stats = new MiningStatsStore(env.DB);
 	const dbWrite = stats
 		.recordStatsBatch(
@@ -582,13 +582,17 @@ export async function processHeartbeats(
 					typeof p.connectionStatus === "string" ? p.connectionStatus : undefined,
 			})),
 		)
-		.catch((err: Error) => {
-			heartbeatLog("error", { err: err.message }, "heartbeat: D1 batch write failed");
+		.catch((err: unknown) => {
+			const message = err instanceof Error ? err.message : String(err);
+			heartbeatLog("error", { err: message }, "heartbeat: D1 batch write failed");
+			failures.push(`D1 batch write failed: ${message}`);
 		});
 
 	const latest = payloads[payloads.length - 1] ?? {};
-	const coordUpdate = coordinatorHeartbeat(env, colo, latest).catch((err: Error) => {
-		heartbeatLog("error", { err: err.message }, "heartbeat: coordinator update failed");
+	const coordUpdate = coordinatorHeartbeat(env, colo, latest).catch((err: unknown) => {
+		const message = err instanceof Error ? err.message : String(err);
+		heartbeatLog("error", { err: message }, "heartbeat: coordinator update failed");
+		failures.push(`coordinator update failed: ${message}`);
 	});
 
 	try {
@@ -626,6 +630,9 @@ export async function processHeartbeats(
 	}
 
 	await Promise.all([dbWrite, coordUpdate]);
+	if (failures.length > 0) {
+		throw new Error(`heartbeat failed: ${failures.join("; ")}`);
+	}
 }
 
 async function coordinatorHeartbeat(
@@ -637,7 +644,7 @@ async function coordinatorHeartbeat(
 	const coordinator = env.MINER_COORDINATOR.get(id);
 	const headers: Record<string, string> = { "Content-Type": "application/json" };
 	if (colo) headers["X-Colo"] = colo;
-	await coordinator.fetch("http://internal/heartbeat", {
+	const response = await coordinator.fetch("http://internal/heartbeat", {
 		method: "POST",
 		headers,
 		body: JSON.stringify({
@@ -647,6 +654,11 @@ async function coordinatorHeartbeat(
 			timestamp: latest.timestamp ?? Date.now(),
 		}),
 	});
+	if (!response.ok) {
+		const body = await response.text().catch(() => "");
+		const suffix = body ? `: ${body.slice(0, 200)}` : "";
+		throw new Error(`coordinator returned ${response.status}${suffix}`);
+	}
 }
 
 function heartbeatNumeric(v: unknown): number | undefined {
