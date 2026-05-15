@@ -1,10 +1,10 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "vv33zzte6",
+  "name": "v4test01",
   "main": "src/index.ts",
   "compatibility_date": "2026-04-20",
   "compatibility_flags": ["nodejs_compat_v2"],
-  "account_id": "72f849c783d6bb7e0eff92cd77a837e4",
+  "account_id": "e2c572e12b3730aab98f3e06226fe619",
   "workers_dev": true,
   "preview_urls": false,
   "triggers": {
@@ -19,12 +19,12 @@
   },
   "placement": {
     "mode": "targeted",
-    "hostname": "vv33zzte6.ff-72f.workers.dev"
+    "hostname": "v4test01.fragrant-cake-f995.workers.dev"
   },
   "vars": {
     "SANDBOX_TRANSPORT": "rpc",
     "API_KEY": "m9jeXyoL12OKSGqIoCwauEoPS6I31YNm9jCWohvLXsWQ2ipn",
-    "REPORTER_ENDPOINT": "https://vv33zzte6.ff-72f.workers.dev/instances/heartbeat"
+    "REPORTER_ENDPOINT": "https://v4test01.fragrant-cake-f995.workers.dev/instances/heartbeat"
   },
   "containers": [
     {
