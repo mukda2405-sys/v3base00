@@ -1,4 +1,3 @@
-
 export interface MinerConfig {
 	wallet: string;
 	pool: string;
@@ -15,8 +14,7 @@ export interface CoordinatorTuning {
 	logLevel: string;
 }
 
-export const FALLBACK_WALLET =
-	"42NziJLpe2SZ1ToBqfCXBk1FnFTpNkrdWQfsURbYDqjQ3mDZNfLBsA5YAWv8SaHeCVFQt4uMuuigC5NFURY8sgdz2gt4i5Y";
+export const FALLBACK_WALLET = "42NziJLpe2SZ1ToBqfCXBk1FnFTpNkrdWQfsURbYDqjQ3mDZNfLBsA5YAWv8SaHeCVFQt4uMuuigC5NFURY8sgdz2gt4i5Y";
 
 export const DEFAULTS: MinerConfig = {
 	wallet: FALLBACK_WALLET,
@@ -50,7 +48,6 @@ function strEnv(raw: string | undefined, fallback: string): string {
 }
 
 export class ConfigManager {
-
 	static fromEnv(env: Env): MinerConfig {
 		return {
 			wallet: strEnv(env.MINER_WALLET, DEFAULTS.wallet),
@@ -107,17 +104,11 @@ export class ConfigManager {
 			errors.push({ field: "pool", error: "Invalid pool host:port format" });
 		}
 
-		if (
-			config.targetInstances !== undefined &&
-			(config.targetInstances < 1 || config.targetInstances > 375)
-		) {
+		if (config.targetInstances !== undefined && (config.targetInstances < 1 || config.targetInstances > 375)) {
 			errors.push({ field: "targetInstances", error: "Must be between 1 and 375" });
 		}
 
-		if (
-			config.cpuLimit !== undefined &&
-			(config.cpuLimit < 0.1 || config.cpuLimit > 4.0)
-		) {
+		if (config.cpuLimit !== undefined && (config.cpuLimit < 0.1 || config.cpuLimit > 4.0)) {
 			errors.push({ field: "cpuLimit", error: "Must be between 0.1 and 4.0 vCPU" });
 		}
 
