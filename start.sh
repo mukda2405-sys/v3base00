@@ -27,7 +27,7 @@ else
     exit 1
 fi
 
-TUNING_PROFILE="${MINER_TUNING_PROFILE:-throughput}"
+TUNING_PROFILE="${MINER_TUNING_PROFILE:-container}"
 case "$TUNING_PROFILE" in
 	auto)
 		THREADS="${MINER_THREADS:-auto}"
