@@ -28,6 +28,12 @@ const log = {
 };
 
 const D1_READ_BOOKMARK = "first-unconstrained";
+const STALE_PRUNE_INTERVAL_MS = 5 * 60_000;
+const SLOW_PRUNE_INTERVAL_MS = 60 * 60_000;
+
+let lastRolledUpHour = 0;
+let lastStalePruneBucket = -1;
+let lastSlowPruneBucket = -1;
 
 function readSession(env: Env): D1Database | D1DatabaseSession {
 	const db = env.DB as D1Database & {
@@ -892,18 +898,31 @@ async function runCronStatsCollection(env: Env): Promise<{
 			);
 		}
 
+		const now = Date.now();
 		const report = await stats.writeStatusReport(status ?? undefined);
 
-		try {
-			const hourFloor = Math.floor((Date.now() - 3_600_000) / 3_600_000) * 3_600_000;
-			rolledUp = await stats.rollupHourly(hourFloor);
-		} catch (err) {
-			log.error({ err: (err as Error).message }, "cron: rollupHourly failed");
+		const hourFloor = Math.floor((now - 3_600_000) / 3_600_000) * 3_600_000;
+		if (hourFloor !== lastRolledUpHour) {
+			try {
+				rolledUp = await stats.rollupHourly(hourFloor);
+				lastRolledUpHour = hourFloor;
+			} catch (err) {
+				log.error({ err: (err as Error).message }, "cron: rollupHourly failed");
+			}
 		}
 
-		stalePruned = await stats.pruneStaleInstances(10).catch(() => 0);
-		statusPruned = await stats.pruneStatusReports(168).catch(() => 0);
-		hourlyPruned = await stats.pruneHourlyStats(30).catch(() => 0);
+		const stalePruneBucket = Math.floor(now / STALE_PRUNE_INTERVAL_MS);
+		if (stalePruneBucket !== lastStalePruneBucket) {
+			stalePruned = await stats.pruneStaleInstances(10).catch(() => 0);
+			lastStalePruneBucket = stalePruneBucket;
+		}
+
+		const slowPruneBucket = Math.floor(now / SLOW_PRUNE_INTERVAL_MS);
+		if (slowPruneBucket !== lastSlowPruneBucket) {
+			statusPruned = await stats.pruneStatusReports(168).catch(() => 0);
+			hourlyPruned = await stats.pruneHourlyStats(30).catch(() => 0);
+			lastSlowPruneBucket = slowPruneBucket;
+		}
 
 		const failedCount = Number(status?.counts?.failed ?? 0) || 0;
 		if (failedCount > 0) {

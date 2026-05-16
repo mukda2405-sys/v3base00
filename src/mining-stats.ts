@@ -566,12 +566,13 @@ export async function processHeartbeats(
 	colo: string | null,
 ): Promise<void> {
 	if (payloads.length === 0) return;
+	const receivedAt = Date.now();
 
 	const stats = new MiningStatsStore(env.DB);
 	const dbWrite = stats
 		.recordStatsBatch(
 			payloads.map((p) => ({
-				timestamp: Number(p.timestamp ?? Date.now()),
+				timestamp: Number(p.timestamp ?? receivedAt),
 				instanceId: typeof p.instanceId === "string" ? p.instanceId : "unknown",
 				hashrate: heartbeatNumeric(p.hashrate),
 				sharesAccepted: heartbeatNumeric(p.sharesAccepted),
@@ -606,13 +607,18 @@ export async function processHeartbeats(
 							? p.connectionStatus.slice(0, 64)
 							: "",
 						colo ?? "",
+						typeof p.poolState === "string" ? p.poolState.slice(0, 64) : "",
+						typeof p.tlsStatus === "string" ? p.tlsStatus.slice(0, 64) : "",
+						typeof p.tuningProfile === "string"
+							? p.tuningProfile.slice(0, 64)
+							: "",
 					],
 					doubles: [
 						Number(p.hashrate) || 0,
 						Number(p.sharesAccepted) || 0,
 						Number(p.sharesRejected) || 0,
 						Number(p.cpuPercent) || 0,
-						Number(p.timestamp) || Date.now(),
+						Number(p.timestamp) || receivedAt,
 					],
 				});
 			}
@@ -637,7 +643,7 @@ async function coordinatorHeartbeat(
 	const coordinator = env.MINER_COORDINATOR.get(id);
 	const headers: Record<string, string> = { "Content-Type": "application/json" };
 	if (colo) headers["X-Colo"] = colo;
-	await coordinator.fetch("http://internal/heartbeat", {
+	const response = await coordinator.fetch("http://internal/heartbeat", {
 		method: "POST",
 		headers,
 		body: JSON.stringify({
@@ -647,6 +653,17 @@ async function coordinatorHeartbeat(
 			timestamp: latest.timestamp ?? Date.now(),
 		}),
 	});
+	if (!response.ok) {
+		let detail = "";
+		try {
+			detail = (await response.text()).slice(0, 256);
+		} catch {
+
+		}
+		throw new Error(
+			`coordinator heartbeat failed: ${response.status}${detail ? ` ${detail}` : ""}`,
+		);
+	}
 }
 
 function heartbeatNumeric(v: unknown): number | undefined {

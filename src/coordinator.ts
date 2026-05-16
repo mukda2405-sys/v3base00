@@ -56,6 +56,7 @@ const SPAWN_DELAY_MS = 100;
 const ALARM_INTERVAL_MS = 250;
 const AUTO_RESTART_INTERVAL_MS = 60_000;
 const HEARTBEAT_TIMEOUT_MS = 90_000;
+const DARK_HASHRATE_WARMUP_MS = 12 * 60_000;
 const OPERATION_STUCK_TIMEOUT_MS = 5 * 60_000;
 const AUTO_INIT_INTERVAL_MS = 60_000;
 const INTERNAL_REPORTER_ENDPOINT = "http://heartbeat.internal/instances/heartbeat";
@@ -202,6 +203,7 @@ export class MinerCoordinator {
 			}
 
 			await this.processHeartbeatTimeout();
+			await this.processDarkHashrateRestart();
 			await this.processAutoRestart(state);
 
 			await this.state.storage.setAlarm(Date.now() + AUTO_RESTART_INTERVAL_MS);
@@ -356,7 +358,7 @@ export class MinerCoordinator {
 		try {
 			const result = await this.env.DB.prepare(
 				`SELECT id, container_id, colo, last_hashrate, last_heartbeat_at,
-				        started_at, retries
+				        started_at, retries, auto_restart_count
 				   FROM coordinator_instances
 				  WHERE status = 'running'
 				    AND (last_hashrate IS NULL OR last_hashrate <= 0)`,
@@ -368,19 +370,29 @@ export class MinerCoordinator {
 
 		const now = Date.now();
 		const byColo: Record<string, number> = {};
+		const warmupCutoff = now - DARK_HASHRATE_WARMUP_MS;
 		const items = rows.map((r) => {
 			const colo = (r.colo as string | null) ?? "unknown";
+			const startedAt = r.started_at != null ? Number(r.started_at) : null;
+			const lastHeartbeatAt =
+				r.last_heartbeat_at != null ? Number(r.last_heartbeat_at) : null;
+			const autoRestartCount =
+				r.auto_restart_count != null ? Number(r.auto_restart_count) : 0;
 			byColo[colo] = (byColo[colo] ?? 0) + 1;
 			return {
 				id: r.id,
 				containerId: r.container_id,
 				colo,
 				lastHashrate: r.last_hashrate != null ? Number(r.last_hashrate) : null,
-				lastHeartbeatAt: r.last_heartbeat_at != null ? Number(r.last_heartbeat_at) : null,
-				ageMs:
-					r.last_heartbeat_at != null ? now - Number(r.last_heartbeat_at) : null,
-				uptimeMs: r.started_at != null ? now - Number(r.started_at) : null,
+				lastHeartbeatAt,
+				ageMs: lastHeartbeatAt != null ? now - lastHeartbeatAt : null,
+				uptimeMs: startedAt != null ? now - startedAt : null,
 				retries: r.retries != null ? Number(r.retries) : 0,
+				autoRestartCount,
+				restartEligible:
+					startedAt !== null &&
+					startedAt < warmupCutoff &&
+					autoRestartCount < MAX_AUTO_RESTARTS,
 			};
 		});
 
@@ -562,23 +574,23 @@ export class MinerCoordinator {
 		}
 
 		const batch = pending.slice(0, BATCH_SIZE);
-		await Promise.allSettled(batch.map((inst) => this.spawnInstance(inst, state.config)));
+		const colo = (await this.state.storage.get<string>("colo")) ?? null;
+		await Promise.allSettled(
+			batch.map((inst) => this.spawnInstance(inst, state.config, colo)),
+		);
 		await this.saveInstances(batch);
 
-		const remainingPending = (await this.getInstances()).filter(
-			(i) => i.status === "pending",
-		).length;
+		const remainingPending = pending.length - batch.length;
 		if (remainingPending > 0) {
 			await this.state.storage.setAlarm(Date.now() + SPAWN_DELAY_MS);
 			log.info({ remainingPending }, "spawn batch continues");
 		} else {
 			state.operation = "idle";
 			await this.saveState(state);
-			const finalInstances = await this.getInstances();
 			log.info(
 				{
-					running: finalInstances.filter((i) => i.status === "running").length,
-					failed: finalInstances.filter((i) => i.status === "error").length,
+					running: all.filter((i) => i.status === "running").length,
+					failed: all.filter((i) => i.status === "error").length,
 					target: TARGET_INSTANCES,
 				},
 				"spawn batch complete",
@@ -590,9 +602,9 @@ export class MinerCoordinator {
 	private async spawnInstance(
 		inst: InstanceRecord,
 		config: CoordinatorConfig,
+		colo: string | null,
 	): Promise<void> {
 
-		const colo = (await this.state.storage.get<string>("colo")) ?? null;
 		const effectivePool = config.pool;
 
 		if ((inst.autoRestartCount ?? 0) > 0) {
@@ -696,9 +708,7 @@ export class MinerCoordinator {
 		await Promise.allSettled(batch.map((inst) => this.destroyInstance(inst)));
 		await this.saveInstances(batch);
 
-		const remaining = (await this.getInstances()).filter(
-			(i) => i.status === "stopping",
-		).length;
+		const remaining = toStop.length - batch.length;
 		if (remaining > 0) {
 			await this.state.storage.setAlarm(Date.now() + SPAWN_DELAY_MS);
 		} else {
@@ -764,6 +774,37 @@ export class MinerCoordinator {
 			}
 		} catch (err) {
 			log.error({ err: (err as Error).message }, "heartbeat timeout sweep failed");
+		}
+	}
+
+	private async processDarkHashrateRestart(): Promise<void> {
+		const now = Date.now();
+		const warmupCutoff = now - DARK_HASHRATE_WARMUP_MS;
+		try {
+			const result = await this.env.DB.prepare(
+				`UPDATE coordinator_instances
+				   SET status = 'error',
+				       error = 'Zero hashrate restart: no positive hashrate after warmup',
+				       updated_at = ?
+				 WHERE status = 'running'
+				   AND started_at IS NOT NULL
+				   AND started_at > 0
+				   AND started_at < ?
+				   AND COALESCE(last_hashrate, 0) <= 0
+				   AND COALESCE(auto_restart_count, 0) < ?`,
+			)
+				.bind(now, warmupCutoff, MAX_AUTO_RESTARTS)
+				.run();
+			const marked = result.meta?.changes ?? 0;
+			if (marked > 0) {
+				log.warn(
+					{ marked, warmupMs: DARK_HASHRATE_WARMUP_MS },
+					"zero-hashrate swept",
+				);
+				this.invalidateCache();
+			}
+		} catch (err) {
+			log.error({ err: (err as Error).message }, "zero-hashrate sweep failed");
 		}
 	}
 
