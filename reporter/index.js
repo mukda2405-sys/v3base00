@@ -8,6 +8,7 @@ const REPORTER_INTERVAL = parseInt(process.env.REPORTER_INTERVAL || "60", 10) * 
 const STATS_INTERVAL = parseInt(process.env.REPORTER_STATS_INTERVAL || "60", 10) * 1000;
 const ENDPOINT = process.env.REPORTER_ENDPOINT || "";
 const INSTANCE_ID = process.env.HOSTNAME || "unknown";
+const TUNING_PROFILE = process.env.MINER_TUNING_PROFILE || "throughput";
 const XMRIG_API_PORT = 8081;
 const XMRIG_API_TOKEN = "xmrig-api-token";
 
@@ -37,6 +38,7 @@ let cachedStats = {
   connectionStatus: "unknown",
   poolState: "unknown",
   tlsStatus: "unknown",
+  tuningProfile: TUNING_PROFILE,
   lastError: "",
   lastErrorTime: 0,
   lastUpdate: 0,
@@ -342,6 +344,7 @@ function updateStats() {
           connectionStatus: uptime > 0 ? "connected" : "disconnected",
           poolState: poolState,
           tlsStatus: tlsStatus,
+          tuningProfile: TUNING_PROFILE,
           lastError: logStats?.lastError || cachedStats.lastError,
           lastErrorTime: logStats?.lastErrorTime || cachedStats.lastErrorTime,
           lastUpdate: Date.now(),
@@ -390,6 +393,7 @@ function reportMetrics() {
     connectionStatus: cachedStats.connectionStatus,
     poolState: cachedStats.poolState,
     tlsStatus: cachedStats.tlsStatus,
+    tuningProfile: cachedStats.tuningProfile,
     uptime: cachedStats.uptime,
     lastError: cachedStats.lastError,
     lastErrorTime: cachedStats.lastErrorTime,
