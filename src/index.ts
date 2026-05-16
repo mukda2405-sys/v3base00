@@ -396,15 +396,8 @@ app.post("/instances/heartbeat", async (c) => {
 			: [body];
 
 	const colo = coloFromRequest(c.req.raw);
-	try {
-		await processHeartbeats(c.env, payloads, colo);
-		return c.json({ acknowledged: true, batchSize: payloads.length });
-	} catch (err) {
-		return c.json(
-			{ acknowledged: false, error: (err as Error).message },
-			500,
-		);
-	}
+	await processHeartbeats(c.env, payloads, colo);
+	return c.json({ acknowledged: true, batchSize: payloads.length });
 });
 
 app.get("/instance/:containerId/xmrig-summary", async (c) => {

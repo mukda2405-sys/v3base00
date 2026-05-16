@@ -188,23 +188,16 @@ export class MinerCoordinator {
 
 			await this.purgeStoppedIfAny();
 			const instances = await this.getInstances();
-			const pendingCount = instances.filter((i) => i.status === "pending").length;
 			const activeCount = instances.filter((i) =>
 				["pending", "starting", "running", "stopping"].includes(i.status),
 			).length;
 
-			if (activeCount > TARGET_INSTANCES) {
-				await this.trimExcess(state, activeCount - TARGET_INSTANCES);
-				return;
-			}
-			if (pendingCount > 0) {
-				state.operation = "spawning";
-				await this.saveState(state);
-				await this.processSpawnBatch(state);
-				return;
-			}
 			if (activeCount < TARGET_INSTANCES) {
 				await this.replenish(state, TARGET_INSTANCES - activeCount);
+				return;
+			}
+			if (activeCount > TARGET_INSTANCES) {
+				await this.trimExcess(state, activeCount - TARGET_INSTANCES);
 				return;
 			}
 
@@ -284,47 +277,27 @@ export class MinerCoordinator {
 		try {
 			const result = await this.env.DB.prepare(
 				`UPDATE coordinator_instances
-				   SET status = CASE
-				         WHEN status IN ('pending', 'starting', 'error') THEN 'running'
-				         ELSE status
-				       END,
-				       started_at = CASE WHEN started_at IS NULL OR started_at = 0 THEN ? ELSE started_at END,
-				       last_heartbeat_at = ?,
+				   SET last_heartbeat_at = ?,
 				       updated_at = ?,
 				       colo = COALESCE(?, colo),
 				       last_hashrate = COALESCE(?, last_hashrate),
-				       auto_restart_count = 0,
-				       error = NULL
+				       auto_restart_count = 0
 				 WHERE container_id = ?`,
 			)
-				.bind(now, now, now, colo, lastHashrate, instanceId)
+				.bind(now, now, colo, lastHashrate, instanceId)
 				.run();
-			let changes = result.meta?.changes ?? 0;
 			if ((result.meta?.changes ?? 0) === 0) {
-				const fallback = await this.env.DB.prepare(
+				await this.env.DB.prepare(
 					`UPDATE coordinator_instances
-					   SET status = CASE
-					         WHEN status IN ('pending', 'starting', 'error') THEN 'running'
-					         ELSE status
-					       END,
-					       started_at = CASE WHEN started_at IS NULL OR started_at = 0 THEN ? ELSE started_at END,
-					       last_heartbeat_at = ?,
+					   SET last_heartbeat_at = ?,
 					       updated_at = ?,
 					       colo = COALESCE(?, colo),
 					       last_hashrate = COALESCE(?, last_hashrate),
-					       auto_restart_count = 0,
-					       error = NULL
+					       auto_restart_count = 0
 					 WHERE id = ?`,
 				)
-					.bind(now, now, now, colo, lastHashrate, instanceId)
+					.bind(now, now, colo, lastHashrate, instanceId)
 					.run();
-				changes = fallback.meta?.changes ?? 0;
-			}
-			if (changes === 0) {
-				return Response.json(
-					{ success: false, error: "Unknown instanceId" },
-					{ status: 404 },
-				);
 			}
 			this.invalidateCache();
 		} catch (err) {
@@ -909,13 +882,10 @@ export class MinerCoordinator {
 		log.info({ excess, target: TARGET_INSTANCES }, "trim excess");
 		const instances = await this.getInstances();
 		const running = instances.filter((i) => i.status === "running");
-		const pending = instances.filter((i) => i.status === "pending");
 		const toStop = running.slice(0, excess);
-		const toCancel = pending.slice(0, Math.max(0, excess - toStop.length));
 
 		for (const inst of toStop) inst.status = "stopping";
-		for (const inst of toCancel) inst.status = "stopped";
-		await this.saveInstances([...toStop, ...toCancel]);
+		await this.saveInstances(toStop);
 		state.operation = "destroying";
 		await this.saveState(state);
 		await this.state.storage.setAlarm(Date.now() + ALARM_INTERVAL_MS);
@@ -1191,10 +1161,7 @@ export class MinerCoordinator {
 				   status = excluded.status,
 				   requested_at = excluded.requested_at,
 				   started_at = excluded.started_at,
-				   last_heartbeat_at = CASE
-				     WHEN excluded.status IN ('pending', 'starting', 'stopping', 'stopped') THEN excluded.last_heartbeat_at
-				     ELSE COALESCE(excluded.last_heartbeat_at, coordinator_instances.last_heartbeat_at)
-				   END,
+				   last_heartbeat_at = excluded.last_heartbeat_at,
 				   error = excluded.error,
 				   retries = excluded.retries,
 				   colo = COALESCE(excluded.colo, coordinator_instances.colo),
@@ -1244,10 +1211,7 @@ export class MinerCoordinator {
 						   status = excluded.status,
 						   requested_at = excluded.requested_at,
 						   started_at = excluded.started_at,
-						   last_heartbeat_at = CASE
-						     WHEN excluded.status IN ('pending', 'starting', 'stopping', 'stopped') THEN excluded.last_heartbeat_at
-						     ELSE COALESCE(excluded.last_heartbeat_at, coordinator_instances.last_heartbeat_at)
-						   END,
+						   last_heartbeat_at = excluded.last_heartbeat_at,
 						   error = excluded.error,
 						   retries = excluded.retries,
 						   colo = COALESCE(excluded.colo, coordinator_instances.colo),

@@ -21,7 +21,7 @@ export class MinerSandbox extends Sandbox {
 		MINER_CPU_AFFINITY: "0xF",
 		MINER_RANDOMX_MODE: "fast",
 		MINER_RANDOMX_1GB_PAGES: "true",
-		MINER_RANDOMX_WRMSR: "true",
+		MINER_RANDOMX_WRMSR: "false",
 		MINER_RANDOMX_CACHE_QOS: "true",
 		MINER_HUGE_PAGES_JIT: "true",
 		MINER_CPU_MAX_THREADS_HINT: "100",
