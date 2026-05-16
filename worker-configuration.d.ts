@@ -23,6 +23,7 @@ declare global {
 		MINER_WALLET?: string;
 		MINER_WORKER_PREFIX?: string;
 		MINER_WORKER_NAME?: string;
+		MINER_TUNING_PROFILE?: string;
 		MINER_TLS?: string;
 
 		TARGET_INSTANCES?: string;

