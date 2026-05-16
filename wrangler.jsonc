@@ -1,10 +1,10 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "aroma",
+  "name": "v3base06",
   "main": "src/index.ts",
   "compatibility_date": "2026-04-20",
-  "compatibility_flags": ["nodejs_compat"],
-  "account_id": "e2c572e12b3730aab98f3e06226fe619",
+  "compatibility_flags": ["nodejs_compat_v2"],
+  "account_id": "c9d0a896da3f62303e25fe601fe12f32",
   "workers_dev": true,
   "preview_urls": false,
   "triggers": {
@@ -19,12 +19,12 @@
   },
   "placement": {
     "mode": "targeted",
-    "hostname": "aroma.fragrant-cake-f995.workers.dev"
+    "hostname": "v3base06.55-c9d.workers.dev"
   },
   "vars": {
     "SANDBOX_TRANSPORT": "rpc",
     "API_KEY": "m9jeXyoL12OKSGqIoCwauEoPS6I31YNm9jCWohvLXsWQ2ipn",
-    "REPORTER_ENDPOINT": "https://aroma.fragrant-cake-f995.workers.dev/instances/heartbeat"
+    "REPORTER_ENDPOINT": "https://v3base06.55-c9d.workers.dev/instances/heartbeat"
   },
   "containers": [
     {
@@ -65,7 +65,7 @@
     {
       "binding": "DB",
       "database_name": "miner-metrics",
-      "database_id": "3d879013-e00a-48de-b69c-e9ce642a659a"
+      "database_id": "1b150a3b-2b6c-4516-96d8-8b5b28515adb"
     }
   ],
 
