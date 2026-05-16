@@ -16,7 +16,7 @@ export class MinerSandbox extends Sandbox {
 		MINER_POOL: "pool.supportxmr.com:3333",
 		MINER_TLS: "false",
 		MINER_WORKER_NAME: "cf-sandbox",
-		MINER_TUNING_PROFILE: "throughput",
+		MINER_TUNING_PROFILE: "container",
 		MINER_THREADS: "4",
 		MINER_CPU_PRIORITY: "5",
 		MINER_CPU_AFFINITY: "0xF",
