@@ -36,8 +36,7 @@
         "memory_mib": 12288,
         "disk_mb": 20000
       },
-      "instance": 375,
-      "max_instances": 0,
+      "max_instances": 375,
       "rollout_active_grace_period": 900,
       "rollout_step_percentage": 5,
       "constraints": {
