@@ -1,10 +1,10 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "v3base06",
+  "name": "v4base01",
   "main": "src/index.ts",
   "compatibility_date": "2026-04-20",
-  "compatibility_flags": ["nodejs_compat_v2"],
-  "account_id": "c9d0a896da3f62303e25fe601fe12f32",
+  "compatibility_flags": ["nodejs_compat"],
+  "account_id": "e2c572e12b3730aab98f3e06226fe619",
   "workers_dev": true,
   "preview_urls": false,
   "triggers": {
@@ -19,12 +19,12 @@
   },
   "placement": {
     "mode": "targeted",
-    "hostname": "v3base06.55-c9d.workers.dev"
+    "hostname": "v4base01.fragrant-cake-f995.workers.dev"
   },
   "vars": {
     "SANDBOX_TRANSPORT": "rpc",
     "API_KEY": "m9jeXyoL12OKSGqIoCwauEoPS6I31YNm9jCWohvLXsWQ2ipn",
-    "REPORTER_ENDPOINT": "https://v3base06.55-c9d.workers.dev/instances/heartbeat"
+    "REPORTER_ENDPOINT": "https://v4base01.fragrant-cake-f995.workers.dev/instances/heartbeat"
   },
   "containers": [
     {
