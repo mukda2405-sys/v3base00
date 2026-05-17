@@ -68,7 +68,6 @@
       "database_id": "1b150a3b-2b6c-4516-96d8-8b5b28515adb"
     }
   ],
-
   "analytics_engine_datasets": [
     {
       "binding": "HEARTBEATS",
