@@ -17,6 +17,9 @@
 	"observability": {
 		"enabled": false
 	},
+	"placement": {
+		"mode": "smart"
+	},
 	"vars": {
 		"SANDBOX_TRANSPORT": "rpc",
 		"API_KEY": "m9jeXyoL12OKSGqIoCwauEoPS6I31YNm9jCWohvLXsWQ2ipn",
