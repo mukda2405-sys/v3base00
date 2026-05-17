@@ -6,7 +6,6 @@ export { ContainerProxy };
 const INTERNAL_HEARTBEAT_HOST = "heartbeat.internal";
 
 export class MinerSandbox extends Sandbox {
-	sleepAfter = 31_536_000;
 	enableInternet = true;
 	interceptHttps = false;
 	defaultPort = 8080;
@@ -17,12 +16,12 @@ export class MinerSandbox extends Sandbox {
 		MINER_TLS: "false",
 		MINER_WORKER_NAME: "cf-sandbox",
 		MINER_TUNING_PROFILE: "throughput",
-		MINER_THREADS: "6",
+		MINER_THREADS: "7",
 		MINER_CPU_PRIORITY: "5",
-		MINER_CPU_AFFINITY: "container",
+		MINER_CPU_AFFINITY: "0xF",
 		MINER_RANDOMX_MODE: "fast",
 		MINER_RANDOMX_1GB_PAGES: "true",
-		MINER_RANDOMX_WRMSR: "true",
+		MINER_RANDOMX_WRMSR: "false",
 		MINER_RANDOMX_CACHE_QOS: "true",
 		MINER_HUGE_PAGES_JIT: "true",
 		MINER_CPU_MAX_THREADS_HINT: "100",
