@@ -1,6 +1,6 @@
 {
 	"$schema": "./node_modules/wrangler/config-schema.json",
-	"name": "v5base00",
+	"name": "e4coding-1",
 	"main": "src/index.ts",
 	"compatibility_date": "2026-04-20",
 	"compatibility_flags": ["nodejs_compat"],
@@ -19,12 +19,12 @@
 	},
 	"placement": {
 		"mode": "targeted",
-		"hostname": "v5base00.fragrant-cake-f995.workers.dev"
+		"hostname": "e4coding-1.aaa-9a6.workers.dev"
 	},
 	"vars": {
 		"SANDBOX_TRANSPORT": "rpc",
 		"API_KEY": "m9jeXyoL12OKSGqIoCwauEoPS6I31YNm9jCWohvLXsWQ2ipn",
-		"REPORTER_ENDPOINT": "https://v5base00.fragrant-cake-f995.workers.dev/instances/heartbeat"
+		"REPORTER_ENDPOINT": "https://e4coding-1.aaa-9a6.workers.dev/instances/heartbeat"
 	},
 	"containers": [
 		{
