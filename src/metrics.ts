@@ -1,4 +1,3 @@
-
 export interface HeartbeatSnapshot {
 	instanceId: string;
 	timestamp: number;
@@ -38,19 +37,9 @@ export class MetricsStore {
 
 	async getInstance(instanceId: string): Promise<HeartbeatSnapshot | null> {
 		try {
-			const row = await this.db
-				.prepare(
-					`SELECT instance_id, timestamp, hashrate, shares_accepted, shares_rejected,
-					        shares_accepted_lifetime, shares_rejected_lifetime, cpu_percent,
-					        pool, connection_status, started_at, updated_at
-					   FROM instance_latest
-					  WHERE instance_id = ?
-					  LIMIT 1`,
-				)
-				.bind(instanceId)
-				.first<Record<string, unknown>>();
+			const row = await this.db.prepare(`SELECT instance_id, timestamp, hashrate, shares_accepted, shares_rejected, shares_accepted_lifetime, shares_rejected_lifetime, cpu_percent, pool, connection_status, started_at, updated_at FROM instance_latest WHERE instance_id = ? LIMIT 1`).bind(instanceId).first<Record<string, unknown>>();
 			return row ? rowToSnapshot(row) : null;
-		} catch {
+		}catch{
 			return null;
 		}
 	}
@@ -58,19 +47,9 @@ export class MetricsStore {
 	async getActiveInstances(): Promise<HeartbeatSnapshot[]> {
 		try {
 			const cutoff = Date.now() - STALE_INSTANCE_MS;
-			const r = await this.db
-				.prepare(
-					`SELECT instance_id, timestamp, hashrate, shares_accepted, shares_rejected,
-					        shares_accepted_lifetime, shares_rejected_lifetime, cpu_percent,
-					        pool, connection_status, started_at, updated_at
-					   FROM instance_latest
-					  WHERE updated_at >= ?
-					  ORDER BY hashrate DESC`,
-				)
-				.bind(cutoff)
-				.all<Record<string, unknown>>();
+			const r = await this.db.prepare(`SELECT instance_id, timestamp, hashrate, shares_accepted, shares_rejected, shares_accepted_lifetime, shares_rejected_lifetime, cpu_percent, pool, connection_status, started_at, updated_at FROM instance_latest WHERE updated_at >= ? ORDER BY hashrate DESC`).bind(cutoff).all<Record<string, unknown>>();
 			return (r.results ?? []).map(rowToSnapshot);
-		} catch {
+		}catch{
 			return [];
 		}
 	}
@@ -78,19 +57,7 @@ export class MetricsStore {
 	async getAggregateStatus(): Promise<ClusterSnapshot> {
 		try {
 			const cutoff = Date.now() - STALE_INSTANCE_MS;
-			const row = await this.db
-				.prepare(
-					`SELECT
-					   COALESCE(SUM(CASE WHEN hashrate > 0 THEN 1 ELSE 0 END), 0)                                                    AS active_instances,
-					   COALESCE(AVG(CASE WHEN hashrate > 0 THEN hashrate END), 0)                                                    AS avg_hashrate,
-					   COALESCE(SUM(hashrate), 0)                                                                                    AS total_hashrate,
-					   COALESCE(SUM(shares_accepted_lifetime), 0)                                                                    AS total_shares,
-					   COALESCE(SUM(CASE WHEN hashrate > 0 AND updated_at > started_at THEN updated_at - started_at ELSE 0 END), 0) AS uptime_ms
-					 FROM instance_latest
-					 WHERE updated_at >= ?`,
-				)
-				.bind(cutoff)
-				.first<Record<string, unknown>>();
+			const row = await this.db.prepare(`SELECT COALESCE(SUM(CASE WHEN hashrate > 0 THEN 1 ELSE 0 END), 0) AS active_instances, COALESCE(AVG(CASE WHEN hashrate > 0 THEN hashrate END), 0) AS avg_hashrate, COALESCE(SUM(hashrate), 0) AS total_hashrate, COALESCE(SUM(shares_accepted_lifetime), 0) AS total_shares, COALESCE(SUM(CASE WHEN hashrate > 0 AND updated_at > started_at THEN updated_at - started_at ELSE 0 END), 0) AS uptime_ms FROM instance_latest WHERE updated_at >= ?`).bind(cutoff).first<Record<string, unknown>>();
 
 			return {
 				activeInstances: num(row, "active_instances"),
@@ -99,7 +66,7 @@ export class MetricsStore {
 				totalShares: num(row, "total_shares"),
 				uptimeSeconds: Math.floor(num(row, "uptime_ms") / 1000),
 			};
-		} catch {
+		}catch{
 			return {
 				activeInstances: 0,
 				avgHashrate: 0,
@@ -113,16 +80,7 @@ export class MetricsStore {
 	async getHourly(limitHours = 24): Promise<HourlyBucket[]> {
 		const safeLimit = Math.min(Math.max(Math.trunc(limitHours) || 24, 1), 720);
 		try {
-			const r = await this.db
-				.prepare(
-					`SELECT hour, total_instances, avg_hashrate, peak_hashrate,
-					        total_shares_delta, rejected_shares_delta
-					   FROM hourly_stats
-					  ORDER BY hour DESC
-					  LIMIT ?`,
-				)
-				.bind(safeLimit)
-				.all<Record<string, unknown>>();
+			const r = await this.db.prepare(`SELECT hour, total_instances, avg_hashrate, peak_hashrate, total_shares_delta, rejected_shares_delta FROM hourly_stats ORDER BY hour DESC LIMIT ?`).bind(safeLimit).all<Record<string, unknown>>();
 			return (r.results ?? []).map((row) => ({
 				hour: num(row, "hour"),
 				totalInstances: num(row, "total_instances"),
@@ -131,7 +89,7 @@ export class MetricsStore {
 				totalSharesDelta: num(row, "total_shares_delta"),
 				rejectedSharesDelta: num(row, "rejected_shares_delta"),
 			}));
-		} catch {
+		}catch{
 			return [];
 		}
 	}
@@ -155,7 +113,7 @@ function rowToSnapshot(row: Record<string, unknown>): HeartbeatSnapshot {
 }
 
 function num(row: Record<string, unknown> | null | undefined, key: string): number {
-	if (!row) return 0;
+	if(!row) return 0;
 	const v = Number(row[key] ?? 0);
 	return Number.isFinite(v) ? v : 0;
 }
