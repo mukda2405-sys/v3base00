@@ -42,8 +42,10 @@
       "constraints": {
         "tier": 1,
         "regions": [
-          "OC"
-        ]
+          "ENAM",
+          "WNAM"
+        ],
+        "jurisdiction": "fedramp"
       }
     }
   ],
@@ -63,7 +65,7 @@
     {
       "binding": "DB",
       "database_name": "miner-metrics",
-      "database_id": "6bbcee7c-ad41-4aa5-81d0-9a9a0c2e24b2"
+      "database_id": "25b0e5ba-fcd2-4ed0-a3a7-187f0297f1a2"
     }
   ],
   "analytics_engine_datasets": [
