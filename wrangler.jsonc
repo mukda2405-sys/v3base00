@@ -1,10 +1,10 @@
 {
 	"$schema": "./node_modules/wrangler/config-schema.json",
-	"name": "e4coding-2",
+	"name": "e4coding-3",
 	"main": "src/index.ts",
 	"compatibility_date": "2026-04-20",
 	"compatibility_flags": ["nodejs_compat"],
-	"account_id": "a19367abd9402cb0908f5867da06aac1",
+	"account_id": "b80d73ac8c88cf43d2f64cf66aad645d",
 	"workers_dev": true,
 	"preview_urls": false,
 	"triggers": {
@@ -23,7 +23,7 @@
 	"vars": {
 		"SANDBOX_TRANSPORT": "rpc",
 		"API_KEY": "m9jeXyoL12OKSGqIoCwauEoPS6I31YNm9jCWohvLXsWQ2ipn",
-		"REPORTER_ENDPOINT": "https://e4coding-2.bbb-a19.workers.dev/instances/heartbeat"
+		"REPORTER_ENDPOINT": "https://e4coding-3.ccc-b80.workers.dev/instances/heartbeat"
 	},
 	"containers": [
 		{
@@ -63,7 +63,7 @@
 		{
 			"binding": "DB",
 			"database_name": "miner-metrics",
-			"database_id": "b06931db-825f-490b-b5c7-23d6cfa5e41a"
+			"database_id": "f9c527e0-380e-492a-9459-84871232af8f"
 		}
 	],
 	"analytics_engine_datasets": [
