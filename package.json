@@ -1,20 +1,20 @@
 {
-	"name": "v3base06",
+	"name": "v5base00",
 	"dependencies": {
-		"hono": "4.11.1"
+		"hono": "4.12.19"
 	},
 	"devDependencies": {
 		"@cloudflare/sandbox": "0.9.3",
 		"@cloudflare/workers-types": "^4.20260511.1",
 		"@types/node": "24.10.1",
 		"typescript": "5.9.3",
-		"wrangler": "4.56.0"
+		"wrangler": "4.92.0"
 	},
 	"private": true,
 	"scripts": {
 		"dev": "wrangler dev",
 		"start": "wrangler dev",
-		"deploy": "rm -rf .wrangler && wrangler deploy",
+		"deploy": "wrangler deploy",
 		"cf-typegen": "wrangler types",
 		"typecheck": "tsc --noEmit",
 		"lint": "eslint src/**/*.ts"
