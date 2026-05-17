@@ -16,8 +16,8 @@ function emitLog(level: string, fields: Record<string, unknown>, msg?: string): 
 		...fields,
 		...(msg ? { msg } : {}),
 	});
-	if (level === "error" || level === "fatal") console.error(payload);
-	else if (level === "warn") console.warn(payload);
+	if(level === "error" || level === "fatal") console.error(payload);
+	else if(level === "warn") console.warn(payload);
 	else console.log(payload);
 }
 
@@ -52,7 +52,7 @@ async function readStatsStore(env: Env): Promise<MiningStatsStore> {
 const app = new Hono<{ Bindings: Env }>();
 
 function coloFromRequest(request: Request | null): string | null {
-	if (!request) return null;
+	if(!request) return null;
 	const cfRay = request.headers.get("CF-Ray") ?? "";
 	const colo = cfRay.split("-")[1];
 	return colo ? colo : null;
@@ -69,27 +69,23 @@ async function coordRpc<T>(
 	const coordinator = env.MINER_COORDINATOR.get(id);
 	const colo = coloFromRequest(request);
 	const headers: Record<string, string> = { "Content-Type": "application/json" };
-	if (colo) headers["X-Colo"] = colo;
-	const init: RequestInit =
-		body === undefined
-			? { method, headers }
-			: { method, headers, body: JSON.stringify(body) };
+	if(colo) headers["X-Colo"] = colo;
+	const init: RequestInit = body === undefined ? { method, headers } : { method, headers, body: JSON.stringify(body) };
 	const result = await coordinator.fetch(`http://internal${path}`, init);
 	return (await result.json()) as T;
 }
 
 app.use("/*", async (c, next) => {
 
-	if (c.req.path === "/health") return next();
-	if (c.req.path === "/instances/heartbeat") return next();
+	if(c.req.path === "/health") return next();
+	if(c.req.path === "/instances/heartbeat") return next();
 
 	const token = c.env.API_KEY;
-	if (typeof token !== "string" || token.length === 0) {
+	if(typeof token !== "string" || token.length === 0){
 		return c.json(
 			{
 				success: false,
-				error:
-					"API_KEY is not configured; set it in wrangler.jsonc#vars or via `wrangler secret put API_KEY`",
+				error: "API_KEY is not configured; set it in wrangler.jsonc#vars or via `wrangler secret put API_KEY`",
 			},
 			503,
 		);
@@ -103,7 +99,7 @@ app.onError((err, c) => {
 		{ err: err.message, stack: err.stack, path: c.req.path },
 		"worker request error",
 	);
-	if (err instanceof HTTPException) return err.getResponse();
+	if(err instanceof HTTPException) return err.getResponse();
 	return c.json(
 		{
 			success: false,
@@ -118,8 +114,7 @@ app.get("/health", (c) => {
 	c.header("Cloudflare-CDN-Cache-Control", "max-age=60");
 	c.header("CDN-Cache-Control", "max-age=60");
 	const authReady = typeof c.env.API_KEY === "string" && c.env.API_KEY.length > 0;
-	const reporterReady =
-		typeof c.env.REPORTER_ENDPOINT === "string" && c.env.REPORTER_ENDPOINT.length > 0;
+	const reporterReady = typeof c.env.REPORTER_ENDPOINT === "string" && c.env.REPORTER_ENDPOINT.length > 0;
 	return c.json({
 		ok: authReady && reporterReady,
 		version: "3.2.0-fleet-watchdog",
@@ -146,20 +141,12 @@ app.get("/heartbeat-health", async (c) => {
 				timestamp: now,
 			});
 			insertOk = true;
-			row = await c.env.DB.prepare(
-				"SELECT hashrate FROM instance_latest WHERE instance_id = ?",
-			)
-				.bind(testId)
-				.first<{ hashrate: number }>();
-		} finally {
-			if (insertOk) {
+			row = await c.env.DB.prepare("SELECT hashrate FROM instance_latest WHERE instance_id = ?").bind(testId).first<{ hashrate: number }>();
+		}finally{
+			if(insertOk){
 				try {
-					await c.env.DB.prepare(
-						"DELETE FROM instance_latest WHERE instance_id = ?",
-					)
-						.bind(testId)
-						.run();
-				} catch (delErr) {
+					await c.env.DB.prepare("DELETE FROM instance_latest WHERE instance_id = ?").bind(testId).run();
+				}catch(delErr){
 					log.error(
 						{ err: (delErr as Error).message },
 						"heartbeat-health cleanup failed",
@@ -178,7 +165,7 @@ app.get("/heartbeat-health", async (c) => {
 			timestamp: now,
 			message: healthy ? "D1 heartbeat pipeline operational" : "D1 heartbeat pipeline failed",
 		});
-	} catch (err) {
+	}catch(err){
 		const e = err as Error;
 		return c.json(
 			{
@@ -218,7 +205,7 @@ app.get("/dark-fleet", async (c) => {
 
 app.post("/restart-instance", async (c) => {
 	const body = (await c.req.json().catch(() => ({}))) as { instanceId?: string };
-	if (!body.instanceId) {
+	if(!body.instanceId){
 		return c.json({ success: false, error: "Missing instanceId" }, 400);
 	}
 	const result = await coordRpc<unknown>(
@@ -238,7 +225,7 @@ app.post("/heal", async (c) => {
 
 app.post("/set-pool", async (c) => {
 	const body = (await c.req.json().catch(() => ({}))) as { pool?: string };
-	if (!body.pool) {
+	if(!body.pool){
 		return c.json({ success: false, error: "Missing pool" }, 400);
 	}
 	const result = await coordRpc<unknown>(c.env, c.req.raw, "/set-pool", "POST", body);
@@ -258,7 +245,7 @@ app.post("/optimize-pool", async (c) => {
 			{ pool: optimalPool },
 		);
 
-		if (!result.success) {
+		if(!result.success){
 			log.warn(
 				{ colo, optimalPool, coordError: result.error },
 				"optimize-pool: coordinator rejected pool",
@@ -282,7 +269,7 @@ app.post("/optimize-pool", async (c) => {
 			message: `Pool optimized for ${colo || "unknown"}`,
 			coordinatorResponse: result,
 		});
-	} catch (err) {
+	}catch(err){
 		return c.json({ success: false, error: (err as Error).message }, 500);
 	}
 });
@@ -320,7 +307,7 @@ interface PoolProbeResult {
 
 async function probePool(target: string, timeoutMs: number): Promise<PoolProbeResult> {
 	const parsed = parseHostPort(target);
-	if (!parsed) {
+	if(!parsed){
 		return {
 			target,
 			host: null,
@@ -347,7 +334,7 @@ async function probePool(target: string, timeoutMs: number): Promise<PoolProbeRe
 		]);
 		const latency = Date.now() - start;
 		return { target, host, port, ok: true, latencyMs: latency, error: null };
-	} catch (err) {
+	}catch(err){
 		return {
 			target,
 			host,
@@ -356,12 +343,12 @@ async function probePool(target: string, timeoutMs: number): Promise<PoolProbeRe
 			latencyMs: null,
 			error: (err as Error).message,
 		};
-	} finally {
+	}finally{
 
-		if (socket) {
+		if(socket){
 			try {
 				await socket.close();
-			} catch {
+			}catch{
 
 			}
 		}
@@ -370,36 +357,33 @@ async function probePool(target: string, timeoutMs: number): Promise<PoolProbeRe
 
 function parseHostPort(input: string): { host: string; port: number } | null {
 	const trimmed = (input ?? "").trim();
-	if (!trimmed) return null;
+	if(!trimmed) return null;
 
-	if (/[\s\/?]/.test(trimmed)) return null;
+	if(/[\s\/?]/.test(trimmed)) return null;
 	const lastColon = trimmed.lastIndexOf(":");
-	if (lastColon <= 0 || lastColon === trimmed.length - 1) return null;
+	if(lastColon <= 0 || lastColon === trimmed.length - 1) return null;
 	const host = trimmed.slice(0, lastColon);
 	const port = Number.parseInt(trimmed.slice(lastColon + 1), 10);
-	if (!Number.isFinite(port) || port <= 0 || port > 65535) return null;
-	if (!/^[A-Za-z0-9.\-]+$/.test(host)) return null;
+	if(!Number.isFinite(port) || port <= 0 || port > 65535) return null;
+	if(!/^[A-Za-z0-9.\-]+$/.test(host)) return null;
 	return { host, port };
 }
 
 function clampInt(raw: string | undefined, fallback: number, min: number, max: number): number {
-	if (raw === undefined) return fallback;
+	if(raw === undefined) return fallback;
 	const n = Number.parseInt(raw, 10);
-	if (!Number.isFinite(n)) return fallback;
+	if(!Number.isFinite(n)) return fallback;
 	return Math.min(max, Math.max(min, n));
 }
 
 app.post("/instances/heartbeat", async (c) => {
 	const raw = await c.req.json().catch(() => null);
-	if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+	if(raw === null || typeof raw !== "object" || Array.isArray(raw)){
 		return c.json({ acknowledged: false, error: "invalid heartbeat body" }, 400);
 	}
 	const body = raw as { batch?: unknown[]; [key: string]: unknown };
 
-	const payloads: Array<Record<string, unknown>> =
-		Array.isArray(body.batch) && body.batch.length > 0
-			? (body.batch as Array<Record<string, unknown>>)
-			: [body];
+	const payloads: Array<Record<string, unknown>> = Array.isArray(body.batch) && body.batch.length > 0 ? (body.batch as Array<Record<string, unknown>>) : [body];
 
 	const colo = coloFromRequest(c.req.raw);
 	await processHeartbeats(c.env, payloads, colo);
@@ -408,7 +392,7 @@ app.post("/instances/heartbeat", async (c) => {
 
 app.get("/instance/:containerId/xmrig-summary", async (c) => {
 	const containerId = c.req.param("containerId");
-	if (!/^[a-zA-Z0-9._-]+$/.test(containerId)) {
+	if(!/^[a-zA-Z0-9._-]+$/.test(containerId)){
 		return c.json({ success: false, error: "Invalid containerId" }, 400);
 	}
 	try {
@@ -418,7 +402,7 @@ app.get("/instance/:containerId/xmrig-summary", async (c) => {
 			() => container.containerFetch("http://localhost:8080/xmrig-summary"),
 			8000,
 		);
-		if (result.status !== 200) {
+		if(result.status !== 200){
 			return c.json(
 				{
 					success: false,
@@ -433,7 +417,7 @@ app.get("/instance/:containerId/xmrig-summary", async (c) => {
 		c.header("Cloudflare-CDN-Cache-Control", "max-age=10");
 		c.header("CDN-Cache-Control", "max-age=10");
 		return c.json({ success: true, containerId, summary });
-	} catch (err) {
+	}catch(err){
 		return c.json(
 			{ success: false, containerId, error: (err as Error).message },
 			500,
@@ -446,14 +430,14 @@ app.get("/container-health", async (c) => {
 		const status = await coordRpc<{
 			instances: Array<{ status: string; containerId: string }>;
 		}>(c.env, c.req.raw, "/status");
-		if (!status.instances?.length) {
+		if(!status.instances?.length){
 			c.header("Cloudflare-CDN-Cache-Control", "max-age=30");
 			c.header("CDN-Cache-Control", "max-age=30");
 			return c.json({ success: true, running: false });
 		}
 
 		const health = await mapLimit(status.instances, 25, async (inst) => {
-			if (inst.status !== "running") {
+			if(inst.status !== "running"){
 				return {
 					containerId: inst.containerId,
 					status: inst.status,
@@ -477,7 +461,7 @@ app.get("/container-health", async (c) => {
 					_running: true,
 					_ok: ok,
 				};
-			} catch (err) {
+			}catch(err){
 				return {
 					containerId: inst.containerId,
 					status: "running",
@@ -491,9 +475,9 @@ app.get("/container-health", async (c) => {
 
 		let totalRunning = 0;
 		let totalReporterOk = 0;
-		for (const h of health) {
-			if (h._running) totalRunning++;
-			if (h._ok) totalReporterOk++;
+		for(const h of health){
+			if(h._running) totalRunning++;
+			if(h._ok) totalReporterOk++;
 			delete (h as Partial<typeof h>)._running;
 			delete (h as Partial<typeof h>)._ok;
 		}
@@ -508,7 +492,7 @@ app.get("/container-health", async (c) => {
 			healthyReporters: totalReporterOk,
 			instances: health,
 		});
-	} catch (err) {
+	}catch(err){
 		return c.json({ success: false, error: (err as Error).message }, 500);
 	}
 });
@@ -518,7 +502,7 @@ app.get("/container-logs", async (c) => {
 		const status = await coordRpc<{
 			instances: Array<{ status: string; containerId: string }>;
 		}>(c.env, c.req.raw, "/status");
-		if (!status.instances?.length) {
+		if(!status.instances?.length){
 			return c.json({ success: true, running: false });
 		}
 
@@ -534,12 +518,12 @@ app.get("/container-logs", async (c) => {
 					() => container.containerFetch("http://localhost:8080/logs"),
 					5000,
 				);
-				if (result.status === 200) {
+				if(result.status === 200){
 					const logs = await result.json();
 					return { containerId: inst.containerId, logs };
 				}
 				return null;
-			} catch (err) {
+			}catch(err){
 				log.error(
 					{ container: inst.containerId, err: (err as Error).message },
 					"container logs fetch failed",
@@ -556,18 +540,18 @@ app.get("/container-logs", async (c) => {
 			totalInstances: status.instances.length,
 			instanceLogs: allLogs,
 		});
-	} catch (err) {
+	}catch(err){
 		return c.json({ success: false, error: (err as Error).message }, 500);
 	}
 });
 
 app.get("/mining-status", async (c) => {
 	try {
-		if (c.req.query("live") !== "1") {
+		if(c.req.query("live") !== "1"){
 			try {
 				const stats = await readStatsStore(c.env);
 				const report = await stats.getLatestStatusReport();
-				if (report) {
+				if(report){
 					c.header("Cloudflare-CDN-Cache-Control", "max-age=15");
 					c.header("CDN-Cache-Control", "max-age=15");
 					return c.json({
@@ -590,7 +574,7 @@ app.get("/mining-status", async (c) => {
 						instances: [],
 					});
 				}
-			} catch (err) {
+			}catch(err){
 				log.warn(
 					{ err: (err as Error).message },
 					"cron report unavailable, falling back live",
@@ -601,7 +585,7 @@ app.get("/mining-status", async (c) => {
 		const status = await coordRpc<{
 			instances: Array<{ status: string; containerId: string }>;
 		}>(c.env, c.req.raw, "/status");
-		if (!status.instances?.length) {
+		if(!status.instances?.length){
 			return c.json({
 				success: true,
 				running: false,
@@ -610,7 +594,7 @@ app.get("/mining-status", async (c) => {
 		}
 
 		const perInstance = await mapLimit(status.instances, 25, async (inst) => {
-			if (inst.status !== "running") {
+			if(inst.status !== "running"){
 				return {
 					containerId: inst.containerId,
 					status: inst.status,
@@ -625,7 +609,7 @@ app.get("/mining-status", async (c) => {
 					() => container.containerFetch("http://localhost:8080/stats"),
 					5000,
 				);
-				if (result.status === 200) {
+				if(result.status === 200){
 					const s = (await result.json()) as Record<string, unknown>;
 					return {
 						containerId: inst.containerId,
@@ -640,7 +624,7 @@ app.get("/mining-status", async (c) => {
 					stats: { error: `Reporter returned ${result.status}` },
 					_agg: null,
 				};
-			} catch (err) {
+			}catch(err){
 				return {
 					containerId: inst.containerId,
 					status: "running",
@@ -660,13 +644,13 @@ app.get("/mining-status", async (c) => {
 			status: string;
 			stats: unknown;
 		}> = [];
-		for (const r of perInstance) {
+		for(const r of perInstance){
 			instanceStats.push({
 				containerId: r.containerId,
 				status: r.status,
 				stats: r.stats,
 			});
-			if (r._agg) {
+			if(r._agg){
 				const agg = r._agg as Record<string, unknown>;
 				totalHashrate += Number(agg.hashrate) || 0;
 				totalSharesAccepted += Number(agg.sharesAccepted) || 0;
@@ -691,7 +675,7 @@ app.get("/mining-status", async (c) => {
 			},
 			instances: instanceStats,
 		});
-	} catch (err) {
+	}catch(err){
 		return c.json({ success: false, error: (err as Error).message }, 500);
 	}
 });
@@ -704,7 +688,7 @@ app.get("/mining-history", async (c) => {
 		c.header("Cloudflare-CDN-Cache-Control", "max-age=60");
 		c.header("CDN-Cache-Control", "max-age=60");
 		return c.json({ success: true, history });
-	} catch (err) {
+	}catch(err){
 		return c.json({ success: false, error: (err as Error).message }, 500);
 	}
 });
@@ -716,7 +700,7 @@ app.get("/mining-totals", async (c) => {
 		c.header("Cloudflare-CDN-Cache-Control", "max-age=15");
 		c.header("CDN-Cache-Control", "max-age=15");
 		return c.json({ success: true, totals });
-	} catch (err) {
+	}catch(err){
 		return c.json({ success: false, error: (err as Error).message }, 500);
 	}
 });
@@ -726,7 +710,7 @@ app.get("/quick-status", async (c) => {
 		try {
 			const stats = await readStatsStore(c.env);
 			const report = await stats.getLatestStatusReport();
-			if (report && !report.staleReport) {
+			if(report && !report.staleReport){
 				return c.json({
 					success: true,
 					running: report.runningInstances > 0,
@@ -751,7 +735,7 @@ app.get("/quick-status", async (c) => {
 					config: report.config,
 				});
 			}
-		} catch (err) {
+		}catch(err){
 			log.warn(
 				{ err: (err as Error).message },
 				"quick-status: cron report unavailable, falling back live",
@@ -764,7 +748,7 @@ app.get("/quick-status", async (c) => {
 			config?: unknown;
 		}>(c.env, c.req.raw, "/status-summary");
 
-		if ((status.counts?.total ?? 0) <= 0) {
+		if((status.counts?.total ?? 0) <= 0){
 			c.header("Cloudflare-CDN-Cache-Control", "max-age=15");
 			c.header("CDN-Cache-Control", "max-age=15");
 			return c.json({
@@ -795,7 +779,7 @@ app.get("/quick-status", async (c) => {
 		try {
 			const stats = await readStatsStore(c.env);
 			totals = await stats.getTotals();
-		} catch (err) {
+		}catch(err){
 			log.error(
 				{ err: (err as Error).message },
 				"quick-status: totals failed",
@@ -825,7 +809,7 @@ app.get("/quick-status", async (c) => {
 			operation: status.operation,
 			config: status.config,
 		});
-	} catch (err) {
+	}catch(err){
 		return c.json({ success: false, error: (err as Error).message }, 500);
 	}
 });
@@ -834,7 +818,7 @@ app.post("/trigger-cron", async (c) => {
 	try {
 		const result = await runCronStatsCollection(c.env);
 		return c.json(result);
-	} catch (err) {
+	}catch(err){
 		return c.json({ success: false, error: (err as Error).message }, 500);
 	}
 });
@@ -851,7 +835,7 @@ app.post("/prune-stats", async (c) => {
 			statusDeleted,
 			hourlyDeleted,
 		});
-	} catch (err) {
+	}catch(err){
 		return c.json({ success: false, error: (err as Error).message }, 500);
 	}
 });
@@ -871,7 +855,7 @@ async function runCronStatsCollection(env: Env): Promise<{
 	log.info({ time: new Date().toISOString() }, "cron: status report begin");
 	const stats = new MiningStatsStore(env.DB);
 	const schemaOk = await stats.validateSchema();
-	if (!schemaOk) {
+	if(!schemaOk){
 		log.error({}, "cron: instance_latest schema validation failed; skipping write cycle");
 		return { success: false, message: "schema validation failed" };
 	}
@@ -891,7 +875,7 @@ async function runCronStatsCollection(env: Env): Promise<{
 		let status: CoordStatus | null = null;
 		try {
 			status = await coordRpc<CoordStatus>(env, null, "/status-summary");
-		} catch (err) {
+		}catch(err){
 			log.error(
 				{ err: (err as Error).message },
 				"cron: coordinator status failed",
@@ -902,34 +886,34 @@ async function runCronStatsCollection(env: Env): Promise<{
 		const report = await stats.writeStatusReport(status ?? undefined);
 
 		const hourFloor = Math.floor((now - 3_600_000) / 3_600_000) * 3_600_000;
-		if (hourFloor !== lastRolledUpHour) {
+		if(hourFloor !== lastRolledUpHour){
 			try {
 				rolledUp = await stats.rollupHourly(hourFloor);
 				lastRolledUpHour = hourFloor;
-			} catch (err) {
+			}catch(err){
 				log.error({ err: (err as Error).message }, "cron: rollupHourly failed");
 			}
 		}
 
 		const stalePruneBucket = Math.floor(now / STALE_PRUNE_INTERVAL_MS);
-		if (stalePruneBucket !== lastStalePruneBucket) {
+		if(stalePruneBucket !== lastStalePruneBucket){
 			stalePruned = await stats.pruneStaleInstances(10).catch(() => 0);
 			lastStalePruneBucket = stalePruneBucket;
 		}
 
 		const slowPruneBucket = Math.floor(now / SLOW_PRUNE_INTERVAL_MS);
-		if (slowPruneBucket !== lastSlowPruneBucket) {
+		if(slowPruneBucket !== lastSlowPruneBucket){
 			statusPruned = await stats.pruneStatusReports(168).catch(() => 0);
 			hourlyPruned = await stats.pruneHourlyStats(30).catch(() => 0);
 			lastSlowPruneBucket = slowPruneBucket;
 		}
 
 		const failedCount = Number(status?.counts?.failed ?? 0) || 0;
-		if (failedCount > 0) {
+		if(failedCount > 0){
 			try {
 				log.info({ failedCount }, "cron: triggering auto-heal");
 				await coordRpc(env, null, "/force-heal", "POST", { resetCounter: false });
-			} catch (err) {
+			}catch(err){
 				log.error({ err: (err as Error).message }, "cron: auto-heal failed");
 			}
 		}
@@ -960,7 +944,7 @@ async function runCronStatsCollection(env: Env): Promise<{
 			rolledUp,
 			report,
 		};
-	} catch (err) {
+	}catch(err){
 		const e = err as Error;
 		log.error({ err: e.message }, "cron: failed");
 		return { success: false, message: e.message };
@@ -988,9 +972,9 @@ async function mapLimit<T, R>(
 	let cursor = 0;
 	const workerCount = Math.min(limit, items.length);
 	const workers = Array.from({ length: workerCount }, async () => {
-		while (true) {
+		while(true){
 			const idx = cursor++;
-			if (idx >= items.length) return;
+			if(idx >= items.length) return;
 			const item = items[idx] as T;
 			results[idx] = await fn(item, idx);
 		}
