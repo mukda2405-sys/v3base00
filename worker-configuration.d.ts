@@ -18,6 +18,16 @@ declare global {
 		MINER_WORKER_NAME?: string;
 		MINER_TUNING_PROFILE?: string;
 		MINER_TLS?: string;
+		MINER_THREADS?: string;
+		MINER_CPU_PRIORITY?: string;
+		MINER_CPU_AFFINITY?: string;
+		MINER_RANDOMX_MODE?: string;
+		MINER_RANDOMX_1GB_PAGES?: string;
+		MINER_RANDOMX_WRMSR?: string;
+		MINER_RANDOMX_CACHE_QOS?: string;
+		MINER_HUGE_PAGES_JIT?: string;
+		MINER_CPU_MAX_THREADS_HINT?: string;
+		MINER_MAX_CPU_USAGE?: string;
 		TARGET_INSTANCES?: string;
 		HEARTBEAT_TIMEOUT_MS?: string;
 		RECONCILE_INTERVAL_MS?: string;
