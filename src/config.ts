@@ -26,7 +26,7 @@ export const DEFAULTS: MinerConfig = {
 };
 
 export const TUNING_DEFAULTS: CoordinatorTuning = {
-	heartbeatTimeoutMs: 120_000,
+	heartbeatTimeoutMs: 240_000,
 	reconcileIntervalMs: 5_000,
 	cronIntervalMs: 60_000,
 	logLevel: "info",
