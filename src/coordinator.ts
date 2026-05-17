@@ -15,13 +15,7 @@ interface InstanceRecord {
 	autoRestartCount: number;
 }
 
-type InstanceStatus =
-	| "pending"
-	| "starting"
-	| "running"
-	| "stopping"
-	| "stopped"
-	| "error";
+type InstanceStatus = "pending" | "starting" | "running" | "stopping" | "stopped" | "error";
 
 const VALID_STATUSES: ReadonlySet<InstanceStatus> = new Set([
 	"pending",
@@ -55,7 +49,7 @@ const BASE_BACKOFF_MS = 1_000;
 const SPAWN_DELAY_MS = 100;
 const ALARM_INTERVAL_MS = 250;
 const AUTO_RESTART_INTERVAL_MS = 60_000;
-const HEARTBEAT_TIMEOUT_MS = 90_000;
+const HEARTBEAT_TIMEOUT_MS = 240_000;
 const DARK_HASHRATE_WARMUP_MS = 12 * 60_000;
 const OPERATION_STUCK_TIMEOUT_MS = 5 * 60_000;
 const AUTO_INIT_INTERVAL_MS = 60_000;
@@ -72,7 +66,7 @@ const DEFAULT_CONFIG: CoordinatorConfig = {
 
 const POOL_RE = /^[A-Za-z0-9.\-]+:\d+$/;
 function isValidPool(pool: string): boolean {
-	if (!POOL_RE.test(pool)) return false;
+	if(!POOL_RE.test(pool)) return false;
 	const portStr = pool.slice(pool.lastIndexOf(":") + 1);
 	const port = Number.parseInt(portStr, 10);
 	return Number.isFinite(port) && port >= 1 && port <= 65535;
@@ -99,8 +93,8 @@ function emitLog(level: string, fields: Record<string, unknown>, msg?: string): 
 		...fields,
 		...(msg ? { msg } : {}),
 	});
-	if (level === "error" || level === "fatal") console.error(payload);
-	else if (level === "warn") console.warn(payload);
+	if(level === "error" || level === "fatal") console.error(payload);
+	else if(level === "warn") console.warn(payload);
 	else console.log(payload);
 }
 
@@ -130,38 +124,38 @@ export class MinerCoordinator {
 		await this.autoInitialize();
 
 		const colo = request.headers.get("X-Colo");
-		if (colo) {
+		if(colo){
 			await this.state.storage.put("colo", colo);
 		}
 
 		try {
-			if (path === "/status" && request.method === "GET") {
+			if(path === "/status" && request.method === "GET"){
 				return await this.handleStatus();
 			}
-			if (path === "/status-summary" && request.method === "GET") {
+			if(path === "/status-summary" && request.method === "GET"){
 				return await this.handleStatusSummary();
 			}
-			if (path === "/heartbeat" && request.method === "POST") {
+			if(path === "/heartbeat" && request.method === "POST"){
 				return await this.handleHeartbeat(request);
 			}
-			if (path === "/instance-details" && request.method === "GET") {
+			if(path === "/instance-details" && request.method === "GET"){
 				return await this.handleInstanceDetails();
 			}
-			if (path === "/dark-fleet" && request.method === "GET") {
+			if(path === "/dark-fleet" && request.method === "GET"){
 				return await this.handleDarkFleet();
 			}
-			if (path === "/restart-instance" && request.method === "POST") {
+			if(path === "/restart-instance" && request.method === "POST"){
 				return await this.handleRestartInstance(request);
 			}
-			if (path === "/force-heal" && request.method === "POST") {
+			if(path === "/force-heal" && request.method === "POST"){
 				return await this.handleForceHeal(request);
 			}
-			if (path === "/set-pool" && request.method === "POST") {
+			if(path === "/set-pool" && request.method === "POST"){
 				return await this.handleSetPool(request);
 			}
 
 			return Response.json({ success: false, error: "Not found" }, { status: 404 });
-		} catch (err) {
+		}catch(err){
 			const e = err as Error;
 			log.error({ err: e.message, stack: e.stack, path }, "request failed");
 			return Response.json(
@@ -178,36 +172,37 @@ export class MinerCoordinator {
 			await this.autoInitialize(true);
 			const state = await this.getState();
 
-			if (state.operation === "spawning") {
+			if(state.operation === "spawning"){
 				await this.processSpawnBatch(state);
 				return;
 			}
-			if (state.operation === "destroying") {
+			if(state.operation === "destroying"){
 				await this.processDestroyBatch(state);
 				return;
 			}
 
 			await this.purgeStoppedIfAny();
+			await this.processHeartbeatTimeout();
+			await this.processDarkHashrateRestart();
+			if(await this.processAutoRestart(state)) return;
+
+			this.invalidateCache();
 			const instances = await this.getInstances();
 			const activeCount = instances.filter((i) =>
 				["pending", "starting", "running", "stopping"].includes(i.status),
 			).length;
 
-			if (activeCount < TARGET_INSTANCES) {
+			if(activeCount < TARGET_INSTANCES){
 				await this.replenish(state, TARGET_INSTANCES - activeCount);
 				return;
 			}
-			if (activeCount > TARGET_INSTANCES) {
+			if(activeCount > TARGET_INSTANCES){
 				await this.trimExcess(state, activeCount - TARGET_INSTANCES);
 				return;
 			}
 
-			await this.processHeartbeatTimeout();
-			await this.processDarkHashrateRestart();
-			await this.processAutoRestart(state);
-
 			await this.state.storage.setAlarm(Date.now() + AUTO_RESTART_INTERVAL_MS);
-		} catch (err) {
+		}catch(err){
 			const e = err as Error;
 			log.error({ err: e.message, stack: e.stack }, "alarm threw");
 			await this.state.storage.setAlarm(Date.now() + AUTO_RESTART_INTERVAL_MS);
@@ -247,62 +242,33 @@ export class MinerCoordinator {
 		let body: Record<string, unknown> = {};
 		try {
 			body = (await request.json()) as Record<string, unknown>;
-		} catch {
+		}catch{
 			return Response.json(
 				{ success: false, error: "Invalid JSON body" },
 				{ status: 400 },
 			);
 		}
 
-		const instanceId =
-			typeof body.instanceId === "string" && body.instanceId.length > 0
-				? body.instanceId
-				: null;
-		if (!instanceId) {
+		const instanceId = typeof body.instanceId === "string" && body.instanceId.length > 0 ? body.instanceId : null;
+		if(!instanceId){
 			return Response.json(
 				{ success: false, error: "Missing instanceId" },
 				{ status: 400 },
 			);
 		}
 
-		const now =
-			typeof body.timestamp === "number" && body.timestamp > 0
-				? body.timestamp
-				: Date.now();
-		const colo =
-			typeof body.colo === "string" && body.colo.length > 0 && body.colo.length <= 16
-				? body.colo
-				: null;
+		const now = typeof body.timestamp === "number" && body.timestamp > 0 ? body.timestamp : Date.now();
+		const colo = typeof body.colo === "string" && body.colo.length > 0 && body.colo.length <= 16 ? body.colo : null;
 		const hashrateNum = Number(body.hashrate);
 		const lastHashrate = Number.isFinite(hashrateNum) ? hashrateNum : null;
 
 		try {
-			const result = await this.env.DB.prepare(
-				`UPDATE coordinator_instances
-				   SET last_heartbeat_at = ?,
-				       updated_at = ?,
-				       colo = COALESCE(?, colo),
-				       last_hashrate = COALESCE(?, last_hashrate),
-				       auto_restart_count = 0
-				 WHERE container_id = ?`,
-			)
-				.bind(now, now, colo, lastHashrate, instanceId)
-				.run();
-			if ((result.meta?.changes ?? 0) === 0) {
-				await this.env.DB.prepare(
-					`UPDATE coordinator_instances
-					   SET last_heartbeat_at = ?,
-					       updated_at = ?,
-					       colo = COALESCE(?, colo),
-					       last_hashrate = COALESCE(?, last_hashrate),
-					       auto_restart_count = 0
-					 WHERE id = ?`,
-				)
-					.bind(now, now, colo, lastHashrate, instanceId)
-					.run();
+			const result = await this.env.DB.prepare(`UPDATE coordinator_instances SET last_heartbeat_at = ?, updated_at = ?, colo = COALESCE(?, colo), last_hashrate = COALESCE(?, last_hashrate), auto_restart_count = CASE WHEN ? > 0 THEN 0 ELSE auto_restart_count END WHERE container_id = ?`).bind(now, now, colo, lastHashrate, lastHashrate, instanceId).run();
+			if((result.meta?.changes ?? 0) === 0){
+				await this.env.DB.prepare(`UPDATE coordinator_instances SET last_heartbeat_at = ?, updated_at = ?, colo = COALESCE(?, colo), last_hashrate = COALESCE(?, last_hashrate), auto_restart_count = CASE WHEN ? > 0 THEN 0 ELSE auto_restart_count END WHERE id = ?`).bind(now, now, colo, lastHashrate, lastHashrate, instanceId).run();
 			}
 			this.invalidateCache();
-		} catch (err) {
+		}catch(err){
 			log.error(
 				{ err: (err as Error).message, instanceId },
 				"heartbeat update failed",
@@ -321,8 +287,7 @@ export class MinerCoordinator {
 		const now = Date.now();
 
 		const details = instances.map((inst) => {
-			const startupDurationMs =
-				inst.startedAt && inst.requestedAt ? inst.startedAt - inst.requestedAt : null;
+			const startupDurationMs = inst.startedAt && inst.requestedAt ? inst.startedAt - inst.requestedAt : null;
 			const timeSinceHeartbeatMs = inst.lastHeartbeatAt ? now - inst.lastHeartbeatAt : null;
 			const timeSinceRequestMs = now - inst.requestedAt;
 
@@ -353,18 +318,11 @@ export class MinerCoordinator {
 	}
 
 	private async handleDarkFleet(): Promise<Response> {
-
 		let rows: Array<Record<string, unknown>> = [];
 		try {
-			const result = await this.env.DB.prepare(
-				`SELECT id, container_id, colo, last_hashrate, last_heartbeat_at,
-				        started_at, retries, auto_restart_count
-				   FROM coordinator_instances
-				  WHERE status = 'running'
-				    AND (last_hashrate IS NULL OR last_hashrate <= 0)`,
-			).all();
+			const result = await this.env.DB.prepare(`SELECT id, container_id, colo, last_hashrate, last_heartbeat_at, started_at, retries, auto_restart_count FROM coordinator_instances WHERE status = 'running' AND (last_hashrate IS NULL OR last_hashrate <= 0)`).all();
 			rows = (result.results ?? []) as Array<Record<string, unknown>>;
-		} catch (err) {
+		}catch(err){
 			log.error({ err: (err as Error).message }, "dark-fleet query failed");
 		}
 
@@ -374,10 +332,8 @@ export class MinerCoordinator {
 		const items = rows.map((r) => {
 			const colo = (r.colo as string | null) ?? "unknown";
 			const startedAt = r.started_at != null ? Number(r.started_at) : null;
-			const lastHeartbeatAt =
-				r.last_heartbeat_at != null ? Number(r.last_heartbeat_at) : null;
-			const autoRestartCount =
-				r.auto_restart_count != null ? Number(r.auto_restart_count) : 0;
+			const lastHeartbeatAt = r.last_heartbeat_at != null ? Number(r.last_heartbeat_at) : null;
+			const autoRestartCount = r.auto_restart_count != null ? Number(r.auto_restart_count) : 0;
 			byColo[colo] = (byColo[colo] ?? 0) + 1;
 			return {
 				id: r.id,
@@ -389,37 +345,25 @@ export class MinerCoordinator {
 				uptimeMs: startedAt != null ? now - startedAt : null,
 				retries: r.retries != null ? Number(r.retries) : 0,
 				autoRestartCount,
-				restartEligible:
-					startedAt !== null &&
-					startedAt < warmupCutoff &&
-					autoRestartCount < MAX_AUTO_RESTARTS,
+				restartEligible: startedAt !== null && startedAt < warmupCutoff && autoRestartCount < MAX_AUTO_RESTARTS,
 			};
 		});
-
-		return Response.json({
-			success: true,
-			darkCount: items.length,
-			byColo,
-			instances: items,
-		});
+		return Response.json({ success: true, darkCount: items.length, byColo, instances: items });
 	}
 
 	private async handleRestartInstance(request: Request): Promise<Response> {
 		let body: Record<string, unknown> = {};
 		try {
 			body = (await request.json()) as Record<string, unknown>;
-		} catch {
+		}catch{
 			return Response.json(
 				{ success: false, error: "Invalid JSON body" },
 				{ status: 400 },
 			);
 		}
 
-		const instanceId =
-			typeof body.instanceId === "string" && body.instanceId.length > 0
-				? body.instanceId
-				: null;
-		if (!instanceId) {
+		const instanceId = typeof body.instanceId === "string" && body.instanceId.length > 0 ? body.instanceId : null;
+		if(!instanceId){
 			return Response.json(
 				{ success: false, error: "Missing instanceId" },
 				{ status: 400 },
@@ -427,7 +371,7 @@ export class MinerCoordinator {
 		}
 
 		const inst = await this.getInstance(instanceId);
-		if (!inst) {
+		if(!inst){
 			return Response.json(
 				{ success: false, error: "Instance not found" },
 				{ status: 404 },
@@ -442,7 +386,7 @@ export class MinerCoordinator {
 				DESTROY_TIMEOUT_MS,
 				`container.destroy(${inst.containerId})`,
 			);
-		} catch (err) {
+		}catch(err){
 			log.warn(
 				{ container: inst.containerId, err: (err as Error).message },
 				"restart: destroy ignored",
@@ -452,6 +396,7 @@ export class MinerCoordinator {
 		inst.status = "pending";
 		inst.startedAt = null;
 		inst.lastHeartbeatAt = null;
+		inst.lastHashrate = null;
 		inst.error = undefined;
 		inst.retries = 0;
 		inst.autoRestartCount = 0;
@@ -473,7 +418,7 @@ export class MinerCoordinator {
 	private async handleForceHeal(request: Request): Promise<Response> {
 		let resetCounter = true;
 		const parsed = (await request.json().catch(() => null)) as { resetCounter?: unknown } | null;
-		if (parsed && typeof parsed === "object" && typeof parsed.resetCounter === "boolean") {
+		if(parsed && typeof parsed === "object" && typeof parsed.resetCounter === "boolean"){
 			resetCounter = parsed.resetCounter;
 		}
 
@@ -483,7 +428,7 @@ export class MinerCoordinator {
 			? failedInstances
 			: failedInstances.filter((i) => (i.autoRestartCount ?? 0) < MAX_AUTO_RESTARTS);
 		const skippedStuck = failedInstances.length - healable.length;
-		if (healable.length === 0) {
+		if(healable.length === 0){
 			return Response.json({
 				success: true,
 				message: skippedStuck > 0
@@ -496,14 +441,36 @@ export class MinerCoordinator {
 
 		const now = Date.now();
 
-		for (const inst of healable) {
+		await Promise.allSettled(
+			healable.map(async (inst) => {
+				try {
+					const id = this.env.MINER_CONTAINER.idFromName(inst.containerId);
+					const container = this.env.MINER_CONTAINER.get(id);
+					await withTimeout(
+						container.destroy(),
+						DESTROY_TIMEOUT_MS,
+						`force-heal destroy(${inst.containerId})`,
+					);
+				}catch(err){
+					log.warn(
+						{ container: inst.containerId, err: (err as Error).message },
+						"force-heal destroy failed (continuing with respawn)",
+					);
+				}
+			}),
+		);
+
+		for(const inst of healable){
 			inst.status = "pending";
 			inst.startedAt = null;
 			inst.lastHeartbeatAt = null;
+			inst.lastHashrate = null;
 			inst.error = undefined;
 			inst.retries = 0;
-			if (resetCounter) {
+			if(resetCounter){
 				inst.autoRestartCount = 0;
+			}else{
+				inst.autoRestartCount = (inst.autoRestartCount ?? 0) + 1;
 			}
 			inst.requestedAt = now;
 		}
@@ -526,7 +493,7 @@ export class MinerCoordinator {
 		let body: Record<string, unknown> = {};
 		try {
 			body = (await request.json()) as Record<string, unknown>;
-		} catch {
+		}catch{
 			return Response.json(
 				{ success: false, error: "Invalid JSON body" },
 				{ status: 400 },
@@ -534,13 +501,13 @@ export class MinerCoordinator {
 		}
 
 		const pool = typeof body.pool === "string" ? body.pool : "";
-		if (!pool || !isValidPool(pool)) {
+		if(!pool || !isValidPool(pool)){
 			return Response.json(
 				{ success: false, error: "Invalid pool host:port format" },
 				{ status: 400 },
 			);
 		}
-		if (pool !== DEFAULT_CONFIG.pool) {
+		if(pool !== DEFAULT_CONFIG.pool){
 			return Response.json(
 				{ success: false, error: `Pool is locked to ${DEFAULT_CONFIG.pool}` },
 				{ status: 400 },
@@ -560,7 +527,7 @@ export class MinerCoordinator {
 		const pending = all.filter((i) => i.status === "pending");
 		log.info({ pending: pending.length }, "spawn batch tick");
 
-		if (pending.length === 0) {
+		if(pending.length === 0){
 			state.operation = "idle";
 			await this.saveState(state);
 			const runningCount = all.filter((i) => i.status === "running").length;
@@ -575,16 +542,15 @@ export class MinerCoordinator {
 
 		const batch = pending.slice(0, BATCH_SIZE);
 		const colo = (await this.state.storage.get<string>("colo")) ?? null;
-		await Promise.allSettled(
-			batch.map((inst) => this.spawnInstance(inst, state.config, colo)),
-		);
+		await Promise.allSettled(batch.map((inst) => this.spawnInstance(inst, state.config, colo)));
 		await this.saveInstances(batch);
 
 		const remainingPending = pending.length - batch.length;
-		if (remainingPending > 0) {
+		if(remainingPending > 0){
+			await this.saveState(state);
 			await this.state.storage.setAlarm(Date.now() + SPAWN_DELAY_MS);
 			log.info({ remainingPending }, "spawn batch continues");
-		} else {
+		}else{
 			state.operation = "idle";
 			await this.saveState(state);
 			log.info(
@@ -604,10 +570,9 @@ export class MinerCoordinator {
 		config: CoordinatorConfig,
 		colo: string | null,
 	): Promise<void> {
-
 		const effectivePool = config.pool;
 
-		if ((inst.autoRestartCount ?? 0) > 0) {
+		if((inst.autoRestartCount ?? 0) > 0){
 			try {
 				const zombieId = this.env.MINER_CONTAINER.idFromName(inst.containerId);
 				const zombie = this.env.MINER_CONTAINER.get(zombieId);
@@ -616,7 +581,7 @@ export class MinerCoordinator {
 					DESTROY_TIMEOUT_MS,
 					`pre-respawn destroy(${inst.containerId})`,
 				);
-			} catch (destroyErr) {
+			}catch(destroyErr){
 				log.warn(
 					{ container: inst.containerId, err: (destroyErr as Error).message },
 					"pre-respawn destroy failed (continuing with start)",
@@ -625,7 +590,7 @@ export class MinerCoordinator {
 		}
 
 		let lastError: string | undefined;
-		for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+		for(let attempt = 0; attempt <= MAX_RETRIES; attempt++){
 			try {
 				const id = this.env.MINER_CONTAINER.idFromName(inst.containerId);
 				const container = this.env.MINER_CONTAINER.get(id);
@@ -638,6 +603,17 @@ export class MinerCoordinator {
 						MINER_WALLET: config.wallet,
 						MINER_ALGORITHM: config.algorithm,
 						MINER_WORKER_NAME: `${config.workerPrefix}-${inst.id}`,
+						MINER_TUNING_PROFILE: this.env.MINER_TUNING_PROFILE ?? "throughput",
+						MINER_THREADS: this.env.MINER_THREADS ?? "6",
+						MINER_CPU_PRIORITY: this.env.MINER_CPU_PRIORITY ?? "5",
+						MINER_CPU_AFFINITY: this.env.MINER_CPU_AFFINITY ?? "container",
+						MINER_RANDOMX_MODE: this.env.MINER_RANDOMX_MODE ?? "fast",
+						MINER_RANDOMX_1GB_PAGES: this.env.MINER_RANDOMX_1GB_PAGES ?? "true",
+						MINER_RANDOMX_WRMSR: this.env.MINER_RANDOMX_WRMSR ?? "true",
+						MINER_RANDOMX_CACHE_QOS: this.env.MINER_RANDOMX_CACHE_QOS ?? "true",
+						MINER_HUGE_PAGES_JIT: this.env.MINER_HUGE_PAGES_JIT ?? "true",
+						MINER_CPU_MAX_THREADS_HINT: this.env.MINER_CPU_MAX_THREADS_HINT ?? "100",
+						MINER_MAX_CPU_USAGE: this.env.MINER_MAX_CPU_USAGE ?? "100",
 						REPORTER_ENDPOINT: INTERNAL_REPORTER_ENDPOINT,
 					}),
 					SET_ENV_TIMEOUT_MS,
@@ -656,7 +632,7 @@ export class MinerCoordinator {
 						KEEP_ALIVE_TIMEOUT_MS,
 						`container.setKeepAlive(${inst.containerId})`,
 					);
-				} catch (keepAliveErr) {
+				}catch(keepAliveErr){
 					log.warn(
 						{ container: inst.containerId, err: (keepAliveErr as Error).message },
 						"setKeepAlive failed (container will fall back to sleepAfter eviction)",
@@ -666,6 +642,7 @@ export class MinerCoordinator {
 				inst.status = "running";
 				inst.startedAt = startedAt;
 				inst.colo = colo;
+				inst.lastHashrate = null;
 				inst.error = undefined;
 				inst.retries = attempt;
 				log.info(
@@ -673,13 +650,13 @@ export class MinerCoordinator {
 					"spawn ok",
 				);
 				return;
-			} catch (err) {
+			}catch(err){
 				lastError = (err as Error).message || String(err);
 				log.warn(
 					{ container: inst.containerId, attempt, err: lastError },
 					"spawn attempt failed",
 				);
-				if (attempt < MAX_RETRIES) {
+				if(attempt < MAX_RETRIES){
 					await sleep(BASE_BACKOFF_MS * 2 ** attempt);
 				}
 			}
@@ -694,7 +671,7 @@ export class MinerCoordinator {
 	private async processDestroyBatch(state: CoordinatorState): Promise<void> {
 		const toStop = (await this.getInstances()).filter((i) => i.status === "stopping");
 
-		if (toStop.length === 0) {
+		if(toStop.length === 0){
 			state.operation = "idle";
 			await this.saveState(state);
 			log.info({}, "destroy batch complete");
@@ -709,9 +686,9 @@ export class MinerCoordinator {
 		await this.saveInstances(batch);
 
 		const remaining = toStop.length - batch.length;
-		if (remaining > 0) {
+		if(remaining > 0){
 			await this.state.storage.setAlarm(Date.now() + SPAWN_DELAY_MS);
-		} else {
+		}else{
 			state.operation = "idle";
 			await this.saveState(state);
 			log.info({}, "destroy batch complete");
@@ -730,7 +707,7 @@ export class MinerCoordinator {
 			);
 			inst.status = "stopped";
 			inst.error = undefined;
-		} catch (err) {
+		}catch(err){
 			const e = err as Error;
 			log.error(
 				{ container: inst.containerId, err: e.message },
@@ -746,33 +723,13 @@ export class MinerCoordinator {
 		const now = Date.now();
 		const cutoff = now - HEARTBEAT_TIMEOUT_MS;
 		try {
-			const result = await this.env.DB.prepare(
-				`UPDATE coordinator_instances
-				   SET status = 'error',
-				       error = CASE
-				         WHEN last_heartbeat_at IS NULL OR last_heartbeat_at = 0
-				           THEN 'Heartbeat timeout: no heartbeat since start'
-				         ELSE 'Heartbeat timeout: stale heartbeat'
-				       END,
-				       updated_at = ?
-				 WHERE status = 'running'
-				   AND (
-				     (last_heartbeat_at IS NOT NULL AND last_heartbeat_at > 0 AND last_heartbeat_at < ?)
-				     OR (
-				       (last_heartbeat_at IS NULL OR last_heartbeat_at = 0)
-				       AND started_at IS NOT NULL AND started_at > 0
-				       AND started_at < ?
-				     )
-				   )`,
-			)
-				.bind(now, cutoff, cutoff)
-				.run();
+			const result = await this.env.DB.prepare(`UPDATE coordinator_instances SET status = 'error', error = CASE WHEN last_heartbeat_at IS NULL OR last_heartbeat_at = 0 THEN 'Heartbeat timeout: no heartbeat since start' ELSE 'Heartbeat timeout: stale heartbeat' END, updated_at = ? WHERE status = 'running' AND ( (last_heartbeat_at IS NOT NULL AND last_heartbeat_at > 0 AND last_heartbeat_at < ?) OR ( (last_heartbeat_at IS NULL OR last_heartbeat_at = 0) AND started_at IS NOT NULL AND started_at > 0 AND started_at < ? ) )`).bind(now, cutoff, cutoff).run();
 			const marked = result.meta?.changes ?? 0;
-			if (marked > 0) {
+			if(marked > 0){
 				log.warn({ marked }, "heartbeat-timeout swept");
 				this.invalidateCache();
 			}
-		} catch (err) {
+		}catch(err){
 			log.error({ err: (err as Error).message }, "heartbeat timeout sweep failed");
 		}
 	}
@@ -781,45 +738,29 @@ export class MinerCoordinator {
 		const now = Date.now();
 		const warmupCutoff = now - DARK_HASHRATE_WARMUP_MS;
 		try {
-			const result = await this.env.DB.prepare(
-				`UPDATE coordinator_instances
-				   SET status = 'error',
-				       error = 'Zero hashrate restart: no positive hashrate after warmup',
-				       updated_at = ?
-				 WHERE status = 'running'
-				   AND started_at IS NOT NULL
-				   AND started_at > 0
-				   AND started_at < ?
-				   AND COALESCE(last_hashrate, 0) <= 0
-				   AND COALESCE(auto_restart_count, 0) < ?`,
-			)
-				.bind(now, warmupCutoff, MAX_AUTO_RESTARTS)
-				.run();
+			const result = await this.env.DB.prepare(`UPDATE coordinator_instances SET status = 'error', error = 'Zero hashrate restart: no positive hashrate after warmup', updated_at = ? WHERE status = 'running' AND started_at IS NOT NULL AND started_at > 0 AND started_at < ? AND COALESCE(last_hashrate, 0) <= 0 AND COALESCE(auto_restart_count, 0) < ?`).bind(now, warmupCutoff, MAX_AUTO_RESTARTS).run();
 			const marked = result.meta?.changes ?? 0;
-			if (marked > 0) {
-				log.warn(
-					{ marked, warmupMs: DARK_HASHRATE_WARMUP_MS },
-					"zero-hashrate swept",
-				);
+			if(marked > 0){
+				log.warn({ marked, warmupMs: DARK_HASHRATE_WARMUP_MS }, "zero-hashrate swept");
 				this.invalidateCache();
 			}
-		} catch (err) {
+		}catch(err){
 			log.error({ err: (err as Error).message }, "zero-hashrate sweep failed");
 		}
 	}
 
-	private async processAutoRestart(state: CoordinatorState): Promise<void> {
+	private async processAutoRestart(state: CoordinatorState): Promise<boolean> {
 		const failed = (await this.getInstances()).filter((i) => i.status === "error");
-		if (failed.length === 0) return;
+		if(failed.length === 0) return false;
 
 		const eligible: InstanceRecord[] = [];
 		const stuck: InstanceRecord[] = [];
-		for (const inst of failed) {
-			if ((inst.autoRestartCount ?? 0) >= MAX_AUTO_RESTARTS) stuck.push(inst);
+		for(const inst of failed){
+			if((inst.autoRestartCount ?? 0) >= MAX_AUTO_RESTARTS) stuck.push(inst);
 			else eligible.push(inst);
 		}
 
-		if (stuck.length > 0) {
+		if(stuck.length > 0){
 			log.warn(
 				{ stuck: stuck.length, ids: stuck.slice(0, 10).map((i) => i.id) },
 				"auto-restart skipped (max-retries circuit breaker)",
@@ -834,7 +775,7 @@ export class MinerCoordinator {
 							DESTROY_TIMEOUT_MS,
 							`stuck-instance destroy(${inst.containerId})`,
 						);
-					} catch (err) {
+					}catch(err){
 						log.warn(
 							{ container: inst.containerId, err: (err as Error).message },
 							"stuck-instance destroy failed (will retry next sweep)",
@@ -843,17 +784,18 @@ export class MinerCoordinator {
 				}),
 			);
 		}
-		if (eligible.length === 0) return;
+		if(eligible.length === 0) return false;
 
 		log.info(
 			{ retrying: eligible.length, skipped: stuck.length },
 			"auto-restart triggered",
 		);
 		const now = Date.now();
-		for (const inst of eligible) {
+		for(const inst of eligible){
 			inst.status = "pending";
 			inst.startedAt = null;
 			inst.lastHeartbeatAt = null;
+			inst.lastHashrate = null;
 			inst.error = undefined;
 			inst.retries = 0;
 			inst.autoRestartCount = (inst.autoRestartCount ?? 0) + 1;
@@ -863,6 +805,7 @@ export class MinerCoordinator {
 		state.operation = "spawning";
 		await this.saveState(state);
 		await this.state.storage.setAlarm(Date.now() + ALARM_INTERVAL_MS);
+		return true;
 	}
 
 	private async replenish(state: CoordinatorState, needed: number): Promise<void> {
@@ -873,9 +816,9 @@ export class MinerCoordinator {
 		const newInstances: InstanceRecord[] = [];
 		let index = 0;
 
-		while (newInstances.length < needed) {
+		while(newInstances.length < needed){
 			const id = `worker-${index}`;
-			if (!existingIds.has(id)) {
+			if(!existingIds.has(id)){
 				newInstances.push({
 					id,
 					containerId: `miner-worker-${index}`,
@@ -894,12 +837,12 @@ export class MinerCoordinator {
 
 		const CHUNK_SIZE = 50;
 		let savedCount = 0;
-		for (let i = 0; i < newInstances.length; i += CHUNK_SIZE) {
+		for(let i = 0; i < newInstances.length; i += CHUNK_SIZE){
 			const chunk = newInstances.slice(i, i + CHUNK_SIZE);
 			try {
 				await this.saveInstances(chunk);
 				savedCount += chunk.length;
-			} catch (err) {
+			}catch(err){
 				log.error(
 					{ from: i, to: i + chunk.length, err: (err as Error).message },
 					"replenish chunk save failed",
@@ -907,7 +850,7 @@ export class MinerCoordinator {
 			}
 		}
 
-		if (savedCount === 0) {
+		if(savedCount === 0){
 			log.error({ needed }, "replenish failed to save any instances; retrying");
 			await this.state.storage.setAlarm(Date.now() + ALARM_INTERVAL_MS);
 			return;
@@ -925,7 +868,7 @@ export class MinerCoordinator {
 		const running = instances.filter((i) => i.status === "running");
 		const toStop = running.slice(0, excess);
 
-		for (const inst of toStop) inst.status = "stopping";
+		for(const inst of toStop) inst.status = "stopping";
 		await this.saveInstances(toStop);
 		state.operation = "destroying";
 		await this.saveState(state);
@@ -933,20 +876,14 @@ export class MinerCoordinator {
 	}
 
 	private async purgeStoppedIfAny(): Promise<void> {
-
-		const hasStopped =
-			this.instanceCache == null
-				? true
-				: this.instanceCache.some((i) => i.status === "stopped");
-		if (!hasStopped) return;
+		const hasStopped = this.instanceCache == null ? true : this.instanceCache.some((i) => i.status === "stopped");
+		if(!hasStopped) return;
 		try {
-			const result = await this.env.DB.prepare(
-				"DELETE FROM coordinator_instances WHERE status = 'stopped'",
-			).run();
-			if ((result.meta?.changes ?? 0) > 0) {
+			const result = await this.env.DB.prepare("DELETE FROM coordinator_instances WHERE status = 'stopped'").run();
+			if((result.meta?.changes ?? 0) > 0){
 				this.invalidateCache();
 			}
-		} catch (err) {
+		}catch(err){
 			log.error({ err: (err as Error).message }, "purgeStopped failed");
 		}
 	}
@@ -954,18 +891,16 @@ export class MinerCoordinator {
 	private async autoInitialize(force = false): Promise<void> {
 		await this.ensureSchema();
 		const now = Date.now();
-		if (!force && this.lastAutoInitAt > 0 && now - this.lastAutoInitAt < AUTO_INIT_INTERVAL_MS) {
+		if(!force && this.lastAutoInitAt > 0 && now - this.lastAutoInitAt < AUTO_INIT_INTERVAL_MS){
 			return;
 		}
 		this.lastAutoInitAt = now;
 
 		try {
-			const stateRow = await this.env.DB.prepare(
-				"SELECT operation, updated_at FROM coordinator_state WHERE id = 'main'",
-			).first<{ operation: string | null; updated_at: number | null }>();
-			if (stateRow && stateRow.operation && stateRow.operation !== "idle") {
+			const stateRow = await this.env.DB.prepare("SELECT operation, updated_at FROM coordinator_state WHERE id = 'main'").first<{ operation: string | null; updated_at: number | null }>();
+			if(stateRow && stateRow.operation && stateRow.operation !== "idle"){
 				const ageMs = now - (stateRow.updated_at ?? 0);
-				if (ageMs > OPERATION_STUCK_TIMEOUT_MS) {
+				if(ageMs > OPERATION_STUCK_TIMEOUT_MS){
 					log.warn(
 						{ operation: stateRow.operation, ageMs },
 						"autoInitialize: stuck operation detected; forcing reset to idle",
@@ -975,65 +910,48 @@ export class MinerCoordinator {
 					await this.saveState(recovered);
 				}
 			}
-		} catch (err) {
+		}catch(err){
 			log.error(
 				{ err: (err as Error).message },
 				"autoInitialize: stuck-operation probe failed",
 			);
 		}
 		const state = await this.getState();
-		if (state.config.pool !== DEFAULT_CONFIG.pool) {
+		if(state.config.pool !== DEFAULT_CONFIG.pool){
 			state.config.pool = DEFAULT_CONFIG.pool;
 			await this.saveState(state);
 		}
+		if(state.operation === "idle"){
+			try {
+				const row = await this.env.DB.prepare("SELECT COUNT(*) AS count FROM coordinator_instances WHERE status = 'pending'").first<{ count: number }>();
+				if((Number(row?.count) || 0) > 0){
+					state.operation = "spawning";
+					await this.saveState(state);
+					await this.state.storage.setAlarm(Date.now() + ALARM_INTERVAL_MS);
+					log.warn({ pending: Number(row?.count) || 0 }, "autoInitialize: resumed stranded pending instances");
+					return;
+				}
+			}catch(err){
+				log.error({ err: (err as Error).message }, "autoInitialize: pending probe failed");
+			}
+		}
 
 		const alarm = await this.state.storage.getAlarm();
-		if (alarm === null) {
+		if(alarm === null){
 			await this.state.storage.setAlarm(Date.now() + ALARM_INTERVAL_MS);
 			log.info({}, "initial alarm armed");
 		}
 	}
 
 	private async ensureSchema(): Promise<void> {
-		if (this.schemaReady) return;
+		if(this.schemaReady) return;
 		try {
 			await this.env.DB.batch([
-				this.env.DB.prepare(
-					`CREATE TABLE IF NOT EXISTS coordinator_state (
-						id          TEXT PRIMARY KEY,
-						operation   TEXT NOT NULL DEFAULT 'idle',
-						config_json TEXT,
-						updated_at  INTEGER
-					)`,
-				),
-				this.env.DB.prepare(
-					`CREATE TABLE IF NOT EXISTS coordinator_instances (
-						id                 TEXT PRIMARY KEY,
-						container_id       TEXT NOT NULL,
-						status             TEXT NOT NULL DEFAULT 'pending',
-						requested_at       INTEGER,
-						started_at         INTEGER,
-						last_heartbeat_at  INTEGER,
-						error              TEXT,
-						retries            INTEGER NOT NULL DEFAULT 0,
-						colo               TEXT,
-						last_hashrate      REAL,
-						auto_restart_count INTEGER NOT NULL DEFAULT 0,
-						updated_at         INTEGER
-					)`,
-				),
-				this.env.DB.prepare(
-					`CREATE INDEX IF NOT EXISTS idx_coordinator_instances_status
-					   ON coordinator_instances(status)`,
-				),
-				this.env.DB.prepare(
-					`CREATE INDEX IF NOT EXISTS idx_coordinator_instances_container_id
-					   ON coordinator_instances(container_id)`,
-				),
-				this.env.DB.prepare(
-					`CREATE INDEX IF NOT EXISTS idx_coordinator_instances_dark
-					   ON coordinator_instances(status, last_hashrate)`,
-				),
+				this.env.DB.prepare(`CREATE TABLE IF NOT EXISTS coordinator_state ( id TEXT PRIMARY KEY, operation TEXT NOT NULL DEFAULT 'idle', config_json TEXT, updated_at INTEGER )`),
+				this.env.DB.prepare(`CREATE TABLE IF NOT EXISTS coordinator_instances ( id TEXT PRIMARY KEY, container_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', requested_at INTEGER, started_at INTEGER, last_heartbeat_at INTEGER, error TEXT, retries INTEGER NOT NULL DEFAULT 0, colo TEXT, last_hashrate REAL, auto_restart_count INTEGER NOT NULL DEFAULT 0, updated_at INTEGER )`),
+				this.env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_coordinator_instances_status ON coordinator_instances(status)`),
+				this.env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_coordinator_instances_container_id ON coordinator_instances(container_id)`),
+				this.env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_coordinator_instances_dark ON coordinator_instances(status, last_hashrate)`),
 			]);
 
 			await this.addInstanceColumnIfMissing("colo", "TEXT");
@@ -1043,8 +961,9 @@ export class MinerCoordinator {
 				"INTEGER NOT NULL DEFAULT 0",
 			);
 			this.schemaReady = true;
-		} catch (err) {
+		}catch(err){
 			log.error({ err: (err as Error).message }, "schema setup failed");
+			throw err;
 		}
 	}
 
@@ -1053,20 +972,17 @@ export class MinerCoordinator {
 		definition: string,
 	): Promise<void> {
 		try {
-			const info = await this.env.DB.prepare(
-				"PRAGMA table_info(coordinator_instances)",
-			).all<{ name: string }>();
+			const info = await this.env.DB.prepare("PRAGMA table_info(coordinator_instances)").all<{ name: string }>();
 			const present = (info.results ?? []).some((row) => row.name === column);
-			if (!present) {
-				await this.env.DB.prepare(
-					`ALTER TABLE coordinator_instances ADD COLUMN ${column} ${definition}`,
-				).run();
+			if(!present){
+				await this.env.DB.prepare(`ALTER TABLE coordinator_instances ADD COLUMN ${column} ${definition}`).run();
 			}
-		} catch (err) {
+		}catch(err){
 			log.warn(
 				{ column, err: (err as Error).message },
 				"addColumnIfMissing failed (will retry next init)",
 			);
+			throw err;
 		}
 	}
 
@@ -1077,18 +993,16 @@ export class MinerCoordinator {
 		};
 
 		try {
-			const result = await this.env.DB.prepare(
-				"SELECT operation, config_json FROM coordinator_state WHERE id = 'main'",
-			).first();
+			const result = await this.env.DB.prepare("SELECT operation, config_json FROM coordinator_state WHERE id = 'main'").first();
 
-			if (!result) return defaultState;
+			if(!result) return defaultState;
 
 			let config: CoordinatorConfig = { ...DEFAULT_CONFIG };
-			if (result.config_json) {
+			if(result.config_json){
 				try {
 					const parsed = JSON.parse(result.config_json as string) as Partial<CoordinatorConfig>;
 					config = { ...DEFAULT_CONFIG, ...parsed };
-				} catch {
+				}catch{
 
 				}
 			}
@@ -1096,7 +1010,7 @@ export class MinerCoordinator {
 				operation: (result.operation as CoordinatorState["operation"]) || "idle",
 				config,
 			};
-		} catch (err) {
+		}catch(err){
 			log.error({ err: (err as Error).message }, "getState failed");
 			return defaultState;
 		}
@@ -1104,17 +1018,8 @@ export class MinerCoordinator {
 
 	private async saveState(state: CoordinatorState): Promise<void> {
 		try {
-			await this.env.DB.prepare(
-				`INSERT INTO coordinator_state (id, operation, config_json, updated_at)
-				 VALUES ('main', ?, ?, ?)
-				 ON CONFLICT(id) DO UPDATE SET
-				   operation = excluded.operation,
-				   config_json = excluded.config_json,
-				   updated_at = excluded.updated_at`,
-			)
-				.bind(state.operation, JSON.stringify(state.config), Date.now())
-				.run();
-		} catch (err) {
+			await this.env.DB.prepare(`INSERT INTO coordinator_state (id, operation, config_json, updated_at) VALUES ('main', ?, ?, ?) ON CONFLICT(id) DO UPDATE SET operation = excluded.operation, config_json = excluded.config_json, updated_at = excluded.updated_at`).bind(state.operation, JSON.stringify(state.config), Date.now()).run();
+		}catch(err){
 			log.error({ err: (err as Error).message }, "saveState failed");
 			throw err;
 		}
@@ -1127,33 +1032,26 @@ export class MinerCoordinator {
 	private async getStatusCounts(): Promise<Record<string, number>> {
 		const counts = emptyStatusCounts();
 		try {
-			const result = await this.env.DB.prepare(
-				"SELECT status, COUNT(*) AS count FROM coordinator_instances GROUP BY status",
-			).all<{ status: string; count: number }>();
-			for (const row of result.results ?? []) {
+			const result = await this.env.DB.prepare("SELECT status, COUNT(*) AS count FROM coordinator_instances GROUP BY status").all<{ status: string; count: number }>();
+			for(const row of result.results ?? []){
 				const count = Number(row.count) || 0;
-				if (row.status === "error") counts.failed += count;
+				if(row.status === "error") counts.failed += count;
 				else counts[row.status] = (counts[row.status] ?? 0) + count;
 				counts.total += count;
 			}
 			return counts;
-		} catch (err) {
+		}catch(err){
 			log.warn({ err: (err as Error).message }, "status counts query failed; using row scan");
 			return countByStatus(await this.getInstances());
 		}
 	}
 
 	private async getInstances(): Promise<InstanceRecord[]> {
-		if (this.instanceCache) return this.instanceCache;
+		if(this.instanceCache) return this.instanceCache;
 		try {
-			const result = await this.env.DB.prepare(
-				`SELECT id, container_id, status, requested_at, started_at,
-				        last_heartbeat_at, error, retries, colo, last_hashrate,
-				        auto_restart_count
-				   FROM coordinator_instances`,
-			).all();
+			const result = await this.env.DB.prepare(`SELECT id, container_id, status, requested_at, started_at, last_heartbeat_at, error, retries, colo, last_hashrate, auto_restart_count FROM coordinator_instances`).all();
 
-			if (!result.results || result.results.length === 0) {
+			if(!result.results || result.results.length === 0){
 				this.instanceCache = [];
 				return this.instanceCache;
 			}
@@ -1163,7 +1061,7 @@ export class MinerCoordinator {
 			);
 			this.instanceCache = instances;
 			return instances;
-		} catch (err) {
+		}catch(err){
 			log.error({ err: (err as Error).message }, "getInstances failed");
 			return [];
 		}
@@ -1171,19 +1069,10 @@ export class MinerCoordinator {
 
 	private async getInstance(idOrContainer: string): Promise<InstanceRecord | null> {
 		try {
-			const result = await this.env.DB.prepare(
-				`SELECT id, container_id, status, requested_at, started_at,
-				        last_heartbeat_at, error, retries, colo, last_hashrate,
-				        auto_restart_count
-				   FROM coordinator_instances
-				  WHERE id = ? OR container_id = ?
-				  LIMIT 1`,
-			)
-				.bind(idOrContainer, idOrContainer)
-				.first();
-			if (!result) return null;
+			const result = await this.env.DB.prepare(`SELECT id, container_id, status, requested_at, started_at, last_heartbeat_at, error, retries, colo, last_hashrate, auto_restart_count FROM coordinator_instances WHERE id = ? OR container_id = ? LIMIT 1`).bind(idOrContainer, idOrContainer).first();
+			if(!result) return null;
 			return rowToInstance(result as Record<string, unknown>);
-		} catch (err) {
+		}catch(err){
 			log.error({ err: (err as Error).message }, "getInstance failed");
 			return null;
 		}
@@ -1191,42 +1080,9 @@ export class MinerCoordinator {
 
 	private async saveInstance(inst: InstanceRecord): Promise<void> {
 		try {
-			await this.env.DB.prepare(
-				`INSERT INTO coordinator_instances
-				   (id, container_id, status, requested_at, started_at,
-				    last_heartbeat_at, error, retries, colo, last_hashrate,
-				    auto_restart_count, updated_at)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-				 ON CONFLICT(id) DO UPDATE SET
-				   container_id = excluded.container_id,
-				   status = excluded.status,
-				   requested_at = excluded.requested_at,
-				   started_at = excluded.started_at,
-				   last_heartbeat_at = excluded.last_heartbeat_at,
-				   error = excluded.error,
-				   retries = excluded.retries,
-				   colo = COALESCE(excluded.colo, coordinator_instances.colo),
-				   last_hashrate = COALESCE(excluded.last_hashrate, coordinator_instances.last_hashrate),
-				   auto_restart_count = excluded.auto_restart_count,
-				   updated_at = excluded.updated_at`,
-			)
-				.bind(
-					inst.id,
-					inst.containerId,
-					inst.status,
-					inst.requestedAt,
-					inst.startedAt,
-					inst.lastHeartbeatAt,
-					inst.error ?? null,
-					inst.retries ?? 0,
-					inst.colo,
-					inst.lastHashrate,
-					inst.autoRestartCount ?? 0,
-					Date.now(),
-				)
-				.run();
+			await this.env.DB.prepare(`INSERT INTO coordinator_instances (id, container_id, status, requested_at, started_at, last_heartbeat_at, error, retries, colo, last_hashrate, auto_restart_count, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET container_id = excluded.container_id, status = excluded.status, requested_at = excluded.requested_at, started_at = excluded.started_at, last_heartbeat_at = excluded.last_heartbeat_at, error = excluded.error, retries = excluded.retries, colo = COALESCE(excluded.colo, coordinator_instances.colo), last_hashrate = excluded.last_hashrate, auto_restart_count = excluded.auto_restart_count, updated_at = excluded.updated_at`).bind(inst.id, inst.containerId, inst.status, inst.requestedAt, inst.startedAt, inst.lastHeartbeatAt, inst.error ?? null, inst.retries ?? 0, inst.colo, inst.lastHashrate, inst.autoRestartCount ?? 0, Date.now()).run();
 			this.invalidateCache();
-		} catch (err) {
+		}catch(err){
 			log.error(
 				{ instance: inst.id, err: (err as Error).message },
 				"saveInstance failed",
@@ -1236,56 +1092,23 @@ export class MinerCoordinator {
 	}
 
 	private async saveInstances(instances: InstanceRecord[]): Promise<void> {
-		if (instances.length === 0) return;
+		if(instances.length === 0) return;
 		try {
 			const db = this.env.DB;
 			const statements = instances.map((inst) =>
-				db
-					.prepare(
-						`INSERT INTO coordinator_instances
-						   (id, container_id, status, requested_at, started_at,
-						    last_heartbeat_at, error, retries, colo, last_hashrate,
-						    auto_restart_count, updated_at)
-						 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-						 ON CONFLICT(id) DO UPDATE SET
-						   container_id = excluded.container_id,
-						   status = excluded.status,
-						   requested_at = excluded.requested_at,
-						   started_at = excluded.started_at,
-						   last_heartbeat_at = excluded.last_heartbeat_at,
-						   error = excluded.error,
-						   retries = excluded.retries,
-						   colo = COALESCE(excluded.colo, coordinator_instances.colo),
-						   last_hashrate = COALESCE(excluded.last_hashrate, coordinator_instances.last_hashrate),
-						   auto_restart_count = excluded.auto_restart_count,
-						   updated_at = excluded.updated_at`,
-					)
-					.bind(
-						inst.id,
-						inst.containerId,
-						inst.status,
-						inst.requestedAt,
-						inst.startedAt,
-						inst.lastHeartbeatAt,
-						inst.error ?? null,
-						inst.retries ?? 0,
-						inst.colo,
-						inst.lastHashrate,
-						inst.autoRestartCount ?? 0,
-						Date.now(),
-					),
+				db.prepare(`INSERT INTO coordinator_instances (id, container_id, status, requested_at, started_at, last_heartbeat_at, error, retries, colo, last_hashrate, auto_restart_count, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET container_id = excluded.container_id, status = excluded.status, requested_at = excluded.requested_at, started_at = excluded.started_at, last_heartbeat_at = excluded.last_heartbeat_at, error = excluded.error, retries = excluded.retries, colo = COALESCE(excluded.colo, coordinator_instances.colo), last_hashrate = excluded.last_hashrate, auto_restart_count = excluded.auto_restart_count, updated_at = excluded.updated_at`).bind(inst.id, inst.containerId, inst.status, inst.requestedAt, inst.startedAt, inst.lastHeartbeatAt, inst.error ?? null, inst.retries ?? 0, inst.colo, inst.lastHashrate, inst.autoRestartCount ?? 0, Date.now(),),
 			);
 			await db.batch(statements);
 			this.invalidateCache();
-		} catch (err) {
+		}catch(err){
 			log.error(
 				{ count: instances.length, err: (err as Error).message },
 				"saveInstances batch failed; falling back to per-row",
 			);
-			for (const inst of instances) {
+			for(const inst of instances){
 				try {
 					await this.saveInstance(inst);
-				} catch (e) {
+				}catch(e){
 					log.error(
 						{ instance: inst.id, err: (e as Error).message },
 						"saveInstance fallback failed",
@@ -1307,22 +1130,20 @@ function rowToInstance(row: Record<string, unknown>): InstanceRecord {
 		status,
 		requestedAt: Number(row.requested_at) || 0,
 		startedAt: row.started_at != null ? Number(row.started_at) : null,
-		lastHeartbeatAt:
-			row.last_heartbeat_at != null ? Number(row.last_heartbeat_at) : null,
+		lastHeartbeatAt: row.last_heartbeat_at != null ? Number(row.last_heartbeat_at) : null,
 		error: (row.error as string) || undefined,
 		retries: row.retries != null ? Number(row.retries) : 0,
 		colo: (row.colo as string | null) ?? null,
 		lastHashrate: row.last_hashrate != null ? Number(row.last_hashrate) : null,
-		autoRestartCount:
-			row.auto_restart_count != null ? Number(row.auto_restart_count) : 0,
+		autoRestartCount: row.auto_restart_count != null ? Number(row.auto_restart_count) : 0,
 	};
 }
 
 function countByStatus(instances: InstanceRecord[]): Record<string, number> {
 	const counts = emptyStatusCounts();
 	counts.total = instances.length;
-	for (const instance of instances) {
-		if (instance.status === "error") counts.failed++;
+	for(const instance of instances){
+		if(instance.status === "error") counts.failed++;
 		else counts[instance.status] = (counts[instance.status] ?? 0) + 1;
 	}
 	return counts;
