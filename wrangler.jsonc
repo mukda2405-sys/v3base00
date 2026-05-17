@@ -17,10 +17,6 @@
 	"observability": {
 		"enabled": false
 	},
-	"placement": {
-		"mode": "targeted",
-		"hostname": "e4coding-1.aaa-9a6.workers.dev"
-	},
 	"vars": {
 		"SANDBOX_TRANSPORT": "rpc",
 		"API_KEY": "m9jeXyoL12OKSGqIoCwauEoPS6I31YNm9jCWohvLXsWQ2ipn",
