@@ -1,83 +1,82 @@
 {
-  "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "e4coding-1",
-  "main": "src/index.ts",
-  "compatibility_date": "2026-04-20",
-  "compatibility_flags": ["nodejs_compat"],
-  "account_id": "9a613284d4be6f54fc277d83c2a9c87b",
-  "workers_dev": true,
-  "preview_urls": false,
-  "triggers": {
-    "crons": ["*/1 * * * *"]
-  },
-  "limits": {
-    "cpu_ms": 300000,
-    "subrequests": 10000
-  },
-  "observability": {
-    "enabled": false
-  },
-  "placement": {
-    "mode": "targeted",
-    "hostname": "e4coding-1.aaa-9a6.workers.dev"
-  },
-  "vars": {
-    "SANDBOX_TRANSPORT": "rpc",
-    "API_KEY": "m9jeXyoL12OKSGqIoCwauEoPS6I31YNm9jCWohvLXsWQ2ipn",
-    "REPORTER_ENDPOINT": "https://e4coding-1.aaa-9a6.workers.dev/instances/heartbeat"
-  },
-  "containers": [
-    {
-      "class_name": "MinerSandbox",
-      "name": "miner-container",
-      "image": "./Dockerfile",
-      "instance_type": {
-        "vcpu": 4,
-        "memory_mib": 12288,
-        "disk_mb": 20000
-      },
-      "max_instances": 375,
-      "rollout_active_grace_period": 900,
-      "rollout_step_percentage": 5,
-      "constraints": {
-        "tier": 1,
-        "regions": [
-          "ENAM",
-          "WNAM"
-        ],
-        "jurisdiction": "fedramp"
-      }
-    }
-  ],
-  "durable_objects": {
-    "bindings": [
-      {
-        "name": "MINER_COORDINATOR",
-        "class_name": "MinerCoordinator"
-      },
-      {
-        "name": "MINER_CONTAINER",
-        "class_name": "MinerSandbox"
-      }
-    ]
-  },
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "miner-metrics",
-      "database_id": "25b0e5ba-fcd2-4ed0-a3a7-187f0297f1a2"
-    }
-  ],
-  "analytics_engine_datasets": [
-    {
-      "binding": "HEARTBEATS",
-      "dataset": "miner_heartbeats"
-    }
-  ],
-  "migrations": [
-    {
-      "tag": "v1",
-      "new_sqlite_classes": ["MinerCoordinator", "MinerSandbox"]
-    }
-  ]
+	"$schema": "./node_modules/wrangler/config-schema.json",
+	"name": "v5base00",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-04-20",
+	"compatibility_flags": ["nodejs_compat"],
+	"account_id": "e2c572e12b3730aab98f3e06226fe619",
+	"workers_dev": true,
+	"preview_urls": false,
+	"triggers": {
+		"crons": ["*/1 * * * *"]
+	},
+	"limits": {
+		"cpu_ms": 300000,
+		"subrequests": 10000
+	},
+	"observability": {
+		"enabled": false
+	},
+	"placement": {
+		"mode": "targeted",
+		"hostname": "v5base00.fragrant-cake-f995.workers.dev"
+	},
+	"vars": {
+		"SANDBOX_TRANSPORT": "rpc",
+		"API_KEY": "m9jeXyoL12OKSGqIoCwauEoPS6I31YNm9jCWohvLXsWQ2ipn",
+		"REPORTER_ENDPOINT": "https://v5base00.fragrant-cake-f995.workers.dev/instances/heartbeat"
+	},
+	"containers": [
+		{
+			"class_name": "MinerSandbox",
+			"name": "miner-container",
+			"image": "./Dockerfile",
+			"instance_type": {
+				"vcpu": 4,
+				"memory_mib": 12288,
+				"disk_mb": 20000
+			},
+			"max_instances": 375,
+			"rollout_active_grace_period": 900,
+			"rollout_step_percentage": 5,
+			"constraints": {
+				"regions": [
+					"ENAM",
+					"WNAM"
+				],
+				"jurisdiction": "fedramp"
+			}
+		}
+	],
+	"durable_objects": {
+		"bindings": [
+			{
+				"name": "MINER_COORDINATOR",
+				"class_name": "MinerCoordinator"
+			},
+			{
+				"name": "MINER_CONTAINER",
+				"class_name": "MinerSandbox"
+			}
+		]
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "miner-metrics",
+			"database_id": "1b150a3b-2b6c-4516-96d8-8b5b28515adb"
+		}
+	],
+	"analytics_engine_datasets": [
+		{
+			"binding": "HEARTBEATS",
+			"dataset": "miner_heartbeats"
+		}
+	],
+	"migrations": [
+		{
+			"tag": "v1",
+			"new_sqlite_classes": ["MinerCoordinator", "MinerSandbox"]
+		}
+	]
 }
