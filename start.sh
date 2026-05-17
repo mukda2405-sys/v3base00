@@ -5,26 +5,26 @@ echo "[start] Container starting at $(date)" > /tmp/start.log
 echo "[start] PID: $$" >> /tmp/start.log
 
 if command -v node >/dev/null 2>&1; then
-    echo "[start] Node.js version: $(node --version)" >> /tmp/start.log
+	echo "[start] Node.js version: $(node --version)" >> /tmp/start.log
 else
-    echo "[start] ERROR: node command not found" >> /tmp/start.log
-    exit 1
+	echo "[start] ERROR: node command not found" >> /tmp/start.log
+	exit 1
 fi
 
 SANDBOX_CA="/etc/cloudflare/certs/cloudflare-containers-ca.crt"
 if [ -r "$SANDBOX_CA" ]; then
-    export NODE_EXTRA_CA_CERTS="$SANDBOX_CA"
-    echo "[start] Trusting Sandbox CA via NODE_EXTRA_CA_CERTS=$SANDBOX_CA" >> /tmp/start.log
+	export NODE_EXTRA_CA_CERTS="$SANDBOX_CA"
+	echo "[start] Trusting Sandbox CA via NODE_EXTRA_CA_CERTS=$SANDBOX_CA" >> /tmp/start.log
 else
-    echo "[start] Sandbox CA not present at $SANDBOX_CA; continuing" >> /tmp/start.log
+	echo "[start] Sandbox CA not present at $SANDBOX_CA; continuing" >> /tmp/start.log
 fi
 
 if [ -f /app/reporter/index.js ]; then
-    echo "[start] Reporter found at /app/reporter/index.js" >> /tmp/start.log
+	echo "[start] Reporter found at /app/reporter/index.js" >> /tmp/start.log
 else
-    echo "[start] ERROR: Reporter not found at /app/reporter/index.js" >> /tmp/start.log
-    ls -la /app/ >> /tmp/start.log 2>&1 || true
-    exit 1
+	echo "[start] ERROR: Reporter not found at /app/reporter/index.js" >> /tmp/start.log
+	ls -la /app/ >> /tmp/start.log 2>&1 || true
+	exit 1
 fi
 
 TUNING_PROFILE="${MINER_TUNING_PROFILE:-throughput}"
@@ -47,7 +47,7 @@ case "$TUNING_PROFILE" in
 		TUNING_PROFILE="throughput"
 		THREADS="${MINER_THREADS:-4}"
 		CPU_PRIORITY="${MINER_CPU_PRIORITY:-5}"
-		CPU_AFFINITY="${MINER_CPU_AFFINITY:-container}"
+		CPU_AFFINITY="${MINER_CPU_AFFINITY:-0xF}"
 		CPU_MAX_THREADS_HINT="${MINER_CPU_MAX_THREADS_HINT:-100}"
 		MAX_CPU_USAGE="${MINER_MAX_CPU_USAGE:-100}"
 		;;
@@ -56,7 +56,7 @@ case "$TUNING_PROFILE" in
 		TUNING_PROFILE="throughput"
 		THREADS="${MINER_THREADS:-4}"
 		CPU_PRIORITY="${MINER_CPU_PRIORITY:-5}"
-		CPU_AFFINITY="${MINER_CPU_AFFINITY:-container}"
+		CPU_AFFINITY="${MINER_CPU_AFFINITY:-0xF}"
 		CPU_MAX_THREADS_HINT="${MINER_CPU_MAX_THREADS_HINT:-100}"
 		MAX_CPU_USAGE="${MINER_MAX_CPU_USAGE:-100}"
 		;;
@@ -84,33 +84,33 @@ if [ "$CPU_AFFINITY" = "container" ]; then
 fi
 
 case "$THREADS" in
-    ""|"0"|"auto"|"null") THREADS_ARG="" ;;
-    *) THREADS_ARG="--threads=${THREADS}" ;;
+	""|"0"|"auto"|"null") THREADS_ARG="" ;;
+	*) THREADS_ARG="--threads=${THREADS}" ;;
 esac
 
 case "$CPU_AFFINITY" in
-    ""|"0"|"auto"|"null") ;;
-    *) XMRIG_EXTRA_ARGS="$XMRIG_EXTRA_ARGS --cpu-affinity=${CPU_AFFINITY}" ;;
+	""|"0"|"auto"|"null") ;;
+	*) XMRIG_EXTRA_ARGS="$XMRIG_EXTRA_ARGS --cpu-affinity=${CPU_AFFINITY}" ;;
 esac
 
 if [ "$RANDOMX_1GB_PAGES" = "true" ]; then
-    XMRIG_EXTRA_ARGS="$XMRIG_EXTRA_ARGS --randomx-1gb-pages"
+	XMRIG_EXTRA_ARGS="$XMRIG_EXTRA_ARGS --randomx-1gb-pages"
 fi
 
 if [ "$RANDOMX_WRMSR" = "true" ]; then
-    XMRIG_EXTRA_ARGS="$XMRIG_EXTRA_ARGS --randomx-wrmsr=-1"
+	XMRIG_EXTRA_ARGS="$XMRIG_EXTRA_ARGS --randomx-wrmsr=-1"
 fi
 
 if [ "$RANDOMX_CACHE_QOS" = "true" ]; then
-    XMRIG_EXTRA_ARGS="$XMRIG_EXTRA_ARGS --randomx-cache-qos"
+	XMRIG_EXTRA_ARGS="$XMRIG_EXTRA_ARGS --randomx-cache-qos"
 fi
 
 if [ "$HUGE_PAGES_JIT" = "true" ]; then
-    XMRIG_EXTRA_ARGS="$XMRIG_EXTRA_ARGS --huge-pages-jit"
+	XMRIG_EXTRA_ARGS="$XMRIG_EXTRA_ARGS --huge-pages-jit"
 fi
 
 if [ -n "$CPU_MAX_THREADS_HINT" ] && [ "$CPU_MAX_THREADS_HINT" != "0" ]; then
-    XMRIG_EXTRA_ARGS="$XMRIG_EXTRA_ARGS --cpu-max-threads-hint=${CPU_MAX_THREADS_HINT}"
+	XMRIG_EXTRA_ARGS="$XMRIG_EXTRA_ARGS --cpu-max-threads-hint=${CPU_MAX_THREADS_HINT}"
 fi
 
 echo "[start] Performance config: profile=${TUNING_PROFILE}, threads=${THREADS}, priority=${CPU_PRIORITY}, affinity=${CPU_AFFINITY:-auto}, mode=${RANDOMX_MODE}, 1gb_pages=${RANDOMX_1GB_PAGES}, wrmsr=${RANDOMX_WRMSR}, cache_qos=${RANDOMX_CACHE_QOS}, hp_jit=${HUGE_PAGES_JIT}, max_threads_hint=${CPU_MAX_THREADS_HINT}, max_cpu=${MAX_CPU_USAGE}" >> /tmp/start.log
@@ -158,8 +158,8 @@ echo "[start] XMRig PID: $XMRIG_PID" >> /tmp/start.log
 
 sleep 2
 if ! kill -0 $XMRIG_PID 2>/dev/null; then
-    echo "[start] ERROR: XMRig exited within 2s (check /tmp/xmrig.stdout.log and /tmp/xmrig.log)" >> /tmp/start.log
-    tail -n 50 /tmp/xmrig.stdout.log >> /tmp/start.log 2>/dev/null || true
+	echo "[start] ERROR: XMRig exited within 2s (check /tmp/xmrig.stdout.log and /tmp/xmrig.log)" >> /tmp/start.log
+	tail -n 50 /tmp/xmrig.stdout.log >> /tmp/start.log 2>/dev/null || true
 fi
 
 cd /app/reporter
@@ -169,16 +169,16 @@ REPORTER_PID=$!
 echo "[start] Reporter PID: $REPORTER_PID" >> /tmp/start.log
 
 for i in $(seq 1 30); do
-    if ss -tlnp 2>/dev/null | grep -q ':8080'; then
-        echo "[start] Reporter listening on port 8080" >> /tmp/start.log
-        break
-    fi
-    if ! kill -0 $REPORTER_PID 2>/dev/null; then
-        echo "[start] ERROR: Reporter exited early (check /tmp/reporter.log)" >> /tmp/start.log
-        cat /tmp/reporter.log >> /tmp/start.log 2>/dev/null || true
-        exit 1
-    fi
-    sleep 1
+	if ss -tlnp 2>/dev/null | grep -q ':8080'; then
+		echo "[start] Reporter listening on port 8080" >> /tmp/start.log
+		break
+	fi
+	if ! kill -0 $REPORTER_PID 2>/dev/null; then
+		echo "[start] ERROR: Reporter exited early (check /tmp/reporter.log)" >> /tmp/start.log
+		cat /tmp/reporter.log >> /tmp/start.log 2>/dev/null || true
+		exit 1
+	fi
+	sleep 1
 done
 
 echo "[start] Entering supervisor loop (xmrig=$XMRIG_PID reporter=$REPORTER_PID)" >> /tmp/start.log
@@ -186,14 +186,14 @@ echo "[start] Entering supervisor loop (xmrig=$XMRIG_PID reporter=$REPORTER_PID)
 trap 'echo "[start] received signal, terminating children" >> /tmp/start.log; kill $XMRIG_PID $REPORTER_PID 2>/dev/null || true; wait $XMRIG_PID $REPORTER_PID 2>/dev/null || true; exit 0' INT TERM
 
 while kill -0 $XMRIG_PID 2>/dev/null && kill -0 $REPORTER_PID 2>/dev/null; do
-    sleep 5
+	sleep 5
 done
 
 if ! kill -0 $XMRIG_PID 2>/dev/null; then
-    echo "[start] XMRig PID $XMRIG_PID exited; container shutting down" >> /tmp/start.log
+	echo "[start] XMRig PID $XMRIG_PID exited; container shutting down" >> /tmp/start.log
 fi
 if ! kill -0 $REPORTER_PID 2>/dev/null; then
-    echo "[start] Reporter PID $REPORTER_PID exited; container shutting down" >> /tmp/start.log
+	echo "[start] Reporter PID $REPORTER_PID exited; container shutting down" >> /tmp/start.log
 fi
 
 kill $XMRIG_PID $REPORTER_PID 2>/dev/null || true
