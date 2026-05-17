@@ -604,7 +604,7 @@ export class MinerCoordinator {
 						MINER_ALGORITHM: config.algorithm,
 						MINER_WORKER_NAME: `${config.workerPrefix}-${inst.id}`,
 						MINER_TUNING_PROFILE: this.env.MINER_TUNING_PROFILE ?? "throughput",
-						MINER_THREADS: this.env.MINER_THREADS ?? "6",
+						MINER_THREADS: this.env.MINER_THREADS ?? "4",
 						MINER_CPU_PRIORITY: this.env.MINER_CPU_PRIORITY ?? "5",
 						MINER_CPU_AFFINITY: this.env.MINER_CPU_AFFINITY ?? "container",
 						MINER_RANDOMX_MODE: this.env.MINER_RANDOMX_MODE ?? "fast",
