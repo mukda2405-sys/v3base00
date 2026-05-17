@@ -19,7 +19,7 @@ export class MinerSandbox extends Sandbox {
 		MINER_TUNING_PROFILE: "throughput",
 		MINER_THREADS: "4",
 		MINER_CPU_PRIORITY: "5",
-		MINER_CPU_AFFINITY: "container",
+		MINER_CPU_AFFINITY: "0xF",
 		MINER_RANDOMX_MODE: "fast",
 		MINER_RANDOMX_1GB_PAGES: "true",
 		MINER_RANDOMX_WRMSR: "false",
