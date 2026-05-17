@@ -4,6 +4,7 @@ import { HTTPException } from "hono/http-exception";
 import type { Context } from "hono";
 import { connect } from "cloudflare:sockets";
 import { MinerCoordinator } from "./coordinator";
+import { FALLBACK_WALLET } from "./config";
 import { MiningStatsStore, processHeartbeats } from "./mining-stats";
 
 const DEFAULT_POOL = "pool.supportxmr.com:3333";
@@ -30,6 +31,7 @@ const log = {
 const D1_READ_BOOKMARK = "first-unconstrained";
 const STALE_PRUNE_INTERVAL_MS = 5 * 60_000;
 const SLOW_PRUNE_INTERVAL_MS = 60 * 60_000;
+const INTERNAL_REPORTER_ENDPOINT = "http://heartbeat.internal/instances/heartbeat";
 
 let lastRolledUpHour = 0;
 let lastStalePruneBucket = -1;
@@ -75,6 +77,40 @@ async function coordRpc<T>(
 	return (await result.json()) as T;
 }
 
+function workerNameFromContainerId(containerId: string): string {
+	const match = /^miner-worker-(\d+)$/.exec(containerId);
+	return match ? `cf-sandbox-worker-${match[1]}` : `cf-sandbox-${containerId}`;
+}
+
+async function prepareContainerForDirectFetch(env: Env, containerId: string) {
+	const id = env.MINER_CONTAINER.idFromName(containerId);
+	const container = env.MINER_CONTAINER.get(id);
+	await fetchWithTimeout(
+		() => container.setEnvVars({
+			INSTANCE_ID: containerId,
+			HOSTNAME: containerId,
+			MINER_POOL: env.MINER_POOL ?? DEFAULT_POOL,
+			MINER_ALGORITHM: env.MINER_ALGORITHM ?? "rx/0",
+			MINER_WALLET: env.MINER_WALLET ?? FALLBACK_WALLET,
+			MINER_WORKER_NAME: workerNameFromContainerId(containerId),
+			MINER_TUNING_PROFILE: env.MINER_TUNING_PROFILE ?? "throughput",
+			MINER_THREADS: env.MINER_THREADS ?? "6",
+			MINER_CPU_PRIORITY: env.MINER_CPU_PRIORITY ?? "5",
+			MINER_CPU_AFFINITY: env.MINER_CPU_AFFINITY ?? "container",
+			MINER_RANDOMX_MODE: env.MINER_RANDOMX_MODE ?? "fast",
+			MINER_RANDOMX_1GB_PAGES: env.MINER_RANDOMX_1GB_PAGES ?? "true",
+			MINER_RANDOMX_WRMSR: env.MINER_RANDOMX_WRMSR ?? "true",
+			MINER_RANDOMX_CACHE_QOS: env.MINER_RANDOMX_CACHE_QOS ?? "true",
+			MINER_HUGE_PAGES_JIT: env.MINER_HUGE_PAGES_JIT ?? "true",
+			MINER_CPU_MAX_THREADS_HINT: env.MINER_CPU_MAX_THREADS_HINT ?? "100",
+			MINER_MAX_CPU_USAGE: env.MINER_MAX_CPU_USAGE ?? "100",
+			REPORTER_ENDPOINT: INTERNAL_REPORTER_ENDPOINT,
+		}),
+		5000,
+	);
+	return container;
+}
+
 app.use("/*", async (c, next) => {
 
 	if(c.req.path === "/health") return next();
@@ -90,7 +126,7 @@ app.use("/*", async (c, next) => {
 			503,
 		);
 	}
-	const auth = bearerAuth({ token });
+	const auth = bearerAuth<{ Bindings: Env }>({ token });
 	return auth(c, next);
 });
 
@@ -117,7 +153,7 @@ app.get("/health", (c) => {
 	const reporterReady = typeof c.env.REPORTER_ENDPOINT === "string" && c.env.REPORTER_ENDPOINT.length > 0;
 	return c.json({
 		ok: authReady && reporterReady,
-		version: "3.2.0-fleet-watchdog",
+		version: "3.3.0-v5base00-maxhash",
 		config: {
 			authReady,
 			reporterReady,
@@ -396,8 +432,7 @@ app.get("/instance/:containerId/xmrig-summary", async (c) => {
 		return c.json({ success: false, error: "Invalid containerId" }, 400);
 	}
 	try {
-		const id = c.env.MINER_CONTAINER.idFromName(containerId);
-		const container = c.env.MINER_CONTAINER.get(id);
+		const container = await prepareContainerForDirectFetch(c.env, containerId);
 		const result = await fetchWithTimeout(
 			() => container.containerFetch("http://localhost:8080/xmrig-summary"),
 			8000,
@@ -447,17 +482,20 @@ app.get("/container-health", async (c) => {
 				};
 			}
 			try {
-				const id = c.env.MINER_CONTAINER.idFromName(inst.containerId);
-				const container = c.env.MINER_CONTAINER.get(id);
+				const container = await prepareContainerForDirectFetch(c.env, inst.containerId);
 				const result = await fetchWithTimeout(
 					() => container.containerFetch("http://localhost:8080/health"),
 					5000,
 				);
-				const ok = result.status === 200;
+				const healthBody = result.status === 200
+					? ((await result.json().catch(() => ({}))) as Record<string, unknown>)
+					: {};
+				const ok = result.status === 200 && healthBody.ok !== false;
 				return {
 					containerId: inst.containerId,
 					status: "running",
 					reporter: ok,
+					health: healthBody,
 					_running: true,
 					_ok: ok,
 				};
@@ -512,8 +550,7 @@ app.get("/container-logs", async (c) => {
 
 		const collected = await mapLimit(candidates, 5, async (inst) => {
 			try {
-				const id = c.env.MINER_CONTAINER.idFromName(inst.containerId);
-				const container = c.env.MINER_CONTAINER.get(id);
+				const container = await prepareContainerForDirectFetch(c.env, inst.containerId);
 				const result = await fetchWithTimeout(
 					() => container.containerFetch("http://localhost:8080/logs"),
 					5000,
@@ -551,7 +588,7 @@ app.get("/mining-status", async (c) => {
 			try {
 				const stats = await readStatsStore(c.env);
 				const report = await stats.getLatestStatusReport();
-				if(report){
+				if(report && !report.staleReport){
 					c.header("Cloudflare-CDN-Cache-Control", "max-age=15");
 					c.header("CDN-Cache-Control", "max-age=15");
 					return c.json({
@@ -603,8 +640,7 @@ app.get("/mining-status", async (c) => {
 				};
 			}
 			try {
-				const id = c.env.MINER_CONTAINER.idFromName(inst.containerId);
-				const container = c.env.MINER_CONTAINER.get(id);
+				const container = await prepareContainerForDirectFetch(c.env, inst.containerId);
 				const result = await fetchWithTimeout(
 					() => container.containerFetch("http://localhost:8080/stats"),
 					5000,
