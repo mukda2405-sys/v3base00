@@ -230,8 +230,8 @@ async function ensureColumn(
 		if(!present){
 			await db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`).run();
 		}
-	}catch{
-
+	}catch(err){
+		throw err;
 	}
 }
 
@@ -363,11 +363,13 @@ export async function processHeartbeats(
 		)
 		.catch((err: Error) => {
 			heartbeatLog("error", { err: err.message }, "heartbeat: D1 batch write failed");
+			throw err;
 		});
 
 	const latest = payloads[payloads.length - 1] ?? {};
 	const coordUpdate = coordinatorHeartbeat(env, colo, latest).catch((err: Error) => {
 		heartbeatLog("error", { err: err.message }, "heartbeat: coordinator update failed");
+		throw err;
 	});
 
 	try {
