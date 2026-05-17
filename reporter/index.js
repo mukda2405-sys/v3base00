@@ -10,12 +10,14 @@ const INSTANCE_ID = process.env.HOSTNAME || "unknown";
 const TUNING_PROFILE = process.env.MINER_TUNING_PROFILE || "throughput";
 const XMRIG_API_PORT = 8081;
 const XMRIG_API_TOKEN = "xmrig-api-token";
+const XMRIG_API_TIMEOUT_MS = parseInt(process.env.XMRIG_API_TIMEOUT_MS || "8000", 10);
+const STATS_STALE_MS = Math.max(STATS_INTERVAL * 3, 180000);
 
 const STALL_THRESHOLD = 10;
 const LIVENESS_GRACE_SEC = 300;
 let consecutiveZeroHashSamples = 0;
 
-const MAX_BUFFERED_SAMPLES = 10;
+const MAX_BUFFERED_SAMPLES = 60;
 
 process.on("uncaughtException", (err) => {
 	console.error("[reporter] UNCAUGHT EXCEPTION:", err.message);
@@ -74,7 +76,7 @@ function fetchXmrigApi(path, callback) {
 			"Authorization": "Bearer " + XMRIG_API_TOKEN,
 			"Accept": "application/json",
 		},
-		timeout: 2000,
+		timeout: XMRIG_API_TIMEOUT_MS,
 	};
 
 	const req = http.request(options, (res) => {
@@ -410,7 +412,7 @@ function reportMetrics() {
 				"Content-Type": "application/json",
 				"Content-Length": Buffer.byteLength(data),
 			},
-			timeout: 5000,
+			timeout: 10000,
 		},
 		(res) => {
 			if(res.statusCode === 200){
@@ -453,8 +455,22 @@ function readLogFile(path) {
 
 const server = http.createServer((req, res) => {
 	if(req.url === "/health" && req.method === "GET"){
+		const statsAgeMs = cachedStats.lastUpdate > 0 ? Date.now() - cachedStats.lastUpdate : null;
+		const staleStats = statsAgeMs === null || statsAgeMs > STATS_STALE_MS;
+		const ok = !staleStats && consecutiveZeroHashSamples < STALL_THRESHOLD;
 		res.writeHead(200, { "Content-Type": "application/json" });
-		res.end(JSON.stringify({ ok: true, instance: INSTANCE_ID }));
+		res.end(JSON.stringify({
+			ok,
+			instance: INSTANCE_ID,
+			hashrate: cachedStats.hashrate,
+			connectionStatus: cachedStats.connectionStatus,
+			poolState: cachedStats.poolState,
+			lastUpdate: cachedStats.lastUpdate,
+			statsAgeMs,
+			staleStats,
+			stallCounter: consecutiveZeroHashSamples,
+			stallThreshold: STALL_THRESHOLD,
+		}));
 		return;
 	}
 
