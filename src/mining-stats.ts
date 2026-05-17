@@ -1,4 +1,3 @@
-
 export interface MiningStatsPayload {
 	timestamp: number;
 	instanceId?: string;
@@ -57,10 +56,10 @@ export class MiningStatsStore {
 	}
 
 	async recordStatsBatch(payloads: MiningStatsPayload[]): Promise<void> {
-		if (payloads.length === 0) return;
+		if(payloads.length === 0) return;
 		await ensureSchema(this.db);
 
-		for (let i = 0; i < payloads.length; i += STATEMENT_LIMIT) {
+		for(let i = 0; i < payloads.length; i += STATEMENT_LIMIT){
 			const chunk = payloads.slice(i, i + STATEMENT_LIMIT);
 			const statements = chunk.map((payload) => {
 				const now = Date.now();
@@ -68,48 +67,7 @@ export class MiningStatsStore {
 				const sharesAccepted = toNonNegativeInteger(payload.sharesAccepted);
 				const sharesRejected = toNonNegativeInteger(payload.sharesRejected);
 
-				return this.db
-					.prepare(
-						`INSERT INTO instance_latest
-						 (instance_id, timestamp, hashrate, shares_accepted, shares_rejected,
-						  cpu_percent, pool, connection_status, updated_at, started_at,
-						  shares_accepted_lifetime, shares_rejected_lifetime)
-						 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-						 ON CONFLICT(instance_id) DO UPDATE SET
-						   timestamp = CASE WHEN excluded.timestamp >= instance_latest.timestamp THEN excluded.timestamp ELSE instance_latest.timestamp END,
-						   hashrate = CASE WHEN excluded.timestamp >= instance_latest.timestamp THEN excluded.hashrate ELSE instance_latest.hashrate END,
-						   shares_accepted = CASE WHEN excluded.timestamp >= instance_latest.timestamp THEN excluded.shares_accepted ELSE instance_latest.shares_accepted END,
-						   shares_rejected = CASE WHEN excluded.timestamp >= instance_latest.timestamp THEN excluded.shares_rejected ELSE instance_latest.shares_rejected END,
-						   cpu_percent = CASE WHEN excluded.timestamp >= instance_latest.timestamp THEN excluded.cpu_percent ELSE instance_latest.cpu_percent END,
-						   pool = CASE WHEN excluded.timestamp >= instance_latest.timestamp THEN excluded.pool ELSE instance_latest.pool END,
-						   connection_status = CASE WHEN excluded.timestamp >= instance_latest.timestamp THEN excluded.connection_status ELSE instance_latest.connection_status END,
-						   updated_at = CASE WHEN excluded.timestamp >= instance_latest.timestamp THEN excluded.updated_at ELSE instance_latest.updated_at END,
-						   started_at = CASE WHEN COALESCE(instance_latest.started_at, 0) > 0 THEN instance_latest.started_at ELSE excluded.started_at END,
-						   shares_accepted_lifetime = COALESCE(instance_latest.shares_accepted_lifetime, 0)
-						     + CASE WHEN excluded.timestamp >= instance_latest.timestamp AND excluded.shares_accepted >= instance_latest.shares_accepted
-						            THEN excluded.shares_accepted - instance_latest.shares_accepted
-						            ELSE 0
-						       END,
-						   shares_rejected_lifetime = COALESCE(instance_latest.shares_rejected_lifetime, 0)
-						     + CASE WHEN excluded.timestamp >= instance_latest.timestamp AND excluded.shares_rejected >= instance_latest.shares_rejected
-						            THEN excluded.shares_rejected - instance_latest.shares_rejected
-						            ELSE 0
-						       END`,
-					)
-					.bind(
-						cleanText(payload.instanceId, "unknown", 128),
-						timestamp,
-						toNonNegativeNumber(payload.hashrate),
-						sharesAccepted,
-						sharesRejected,
-						toNullablePercent(payload.cpuPercent),
-						cleanNullableText(payload.pool, 256),
-						cleanNullableText(payload.connectionStatus, 64),
-						now,
-						timestamp,
-						sharesAccepted,
-						sharesRejected,
-					);
+				return this.db.prepare(`INSERT INTO instance_latest (instance_id, timestamp, hashrate, shares_accepted, shares_rejected, cpu_percent, pool, connection_status, updated_at, started_at, shares_accepted_lifetime, shares_rejected_lifetime) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(instance_id) DO UPDATE SET timestamp = CASE WHEN excluded.timestamp >= instance_latest.timestamp THEN excluded.timestamp ELSE instance_latest.timestamp END, hashrate = CASE WHEN excluded.timestamp >= instance_latest.timestamp THEN excluded.hashrate ELSE instance_latest.hashrate END, shares_accepted = CASE WHEN excluded.timestamp >= instance_latest.timestamp THEN excluded.shares_accepted ELSE instance_latest.shares_accepted END, shares_rejected = CASE WHEN excluded.timestamp >= instance_latest.timestamp THEN excluded.shares_rejected ELSE instance_latest.shares_rejected END, cpu_percent = CASE WHEN excluded.timestamp >= instance_latest.timestamp THEN excluded.cpu_percent ELSE instance_latest.cpu_percent END, pool = CASE WHEN excluded.timestamp >= instance_latest.timestamp THEN excluded.pool ELSE instance_latest.pool END, connection_status = CASE WHEN excluded.timestamp >= instance_latest.timestamp THEN excluded.connection_status ELSE instance_latest.connection_status END, updated_at = CASE WHEN excluded.timestamp >= instance_latest.timestamp THEN excluded.updated_at ELSE instance_latest.updated_at END, started_at = CASE WHEN COALESCE(instance_latest.started_at, 0) > 0 THEN instance_latest.started_at ELSE excluded.started_at END, shares_accepted_lifetime = COALESCE(instance_latest.shares_accepted_lifetime, 0) + CASE WHEN excluded.timestamp >= instance_latest.timestamp AND excluded.shares_accepted >= instance_latest.shares_accepted THEN excluded.shares_accepted - instance_latest.shares_accepted ELSE 0 END, shares_rejected_lifetime = COALESCE(instance_latest.shares_rejected_lifetime, 0) + CASE WHEN excluded.timestamp >= instance_latest.timestamp AND excluded.shares_rejected >= instance_latest.shares_rejected THEN excluded.shares_rejected - instance_latest.shares_rejected ELSE 0 END`).bind(cleanText(payload.instanceId, "unknown", 128), timestamp, toNonNegativeNumber(payload.hashrate), sharesAccepted, sharesRejected, toNullablePercent(payload.cpuPercent), cleanNullableText(payload.pool, 256), cleanNullableText(payload.connectionStatus, 64), now, timestamp, sharesAccepted, sharesRejected);
 			});
 			await this.db.batch(statements);
 		}
@@ -118,53 +76,14 @@ export class MiningStatsStore {
 	async getHistory(limit = 100): Promise<unknown[]> {
 		await ensureSchema(this.db);
 		const safeLimit = Math.min(Math.max(Math.trunc(limit) || 100, 1), 1000);
-		const r = await this.db
-			.prepare(
-				`SELECT
-				   timestamp,
-				   '__cluster__' AS instance_id,
-				   total_hashrate AS hashrate,
-				   total_shares_lifetime AS shares_accepted,
-				   total_shares_rejected_lifetime AS shares_rejected,
-				   active_instances,
-				   running_instances,
-				   total_instances,
-				   average_hashrate,
-				   peak_hashrate,
-				   rejection_rate,
-				   cumulative_uptime_seconds,
-				   shares_per_second,
-				   operation
-				 FROM mining_status_reports
-				 ORDER BY timestamp DESC
-				 LIMIT ?`,
-			)
-			.bind(safeLimit)
-			.all();
+		const r = await this.db.prepare(`SELECT timestamp, '__cluster__' AS instance_id, total_hashrate AS hashrate, total_shares_lifetime AS shares_accepted, total_shares_rejected_lifetime AS shares_rejected, active_instances, running_instances, total_instances, average_hashrate, peak_hashrate, rejection_rate, cumulative_uptime_seconds, shares_per_second, operation FROM mining_status_reports ORDER BY timestamp DESC LIMIT ?`).bind(safeLimit).all();
 		return r.results ?? [];
 	}
 
 	async getTotals(): Promise<MiningTotals> {
 		await ensureSchema(this.db);
 		const staleCutoff = Date.now() - STALE_INSTANCE_MS;
-		const row = await this.db
-			.prepare(
-				`SELECT
-				   COALESCE(SUM(shares_accepted), 0)                                                                            AS totalShares,
-				   COALESCE(SUM(shares_rejected), 0)                                                                            AS totalSharesRejected,
-				   COALESCE(SUM(shares_accepted_lifetime), 0)                                                                   AS totalSharesLifetime,
-				   COALESCE(SUM(shares_rejected_lifetime), 0)                                                                   AS totalSharesRejectedLifetime,
-				   COALESCE(SUM(hashrate), 0)                                                                                   AS totalHashrate,
-				   COALESCE(AVG(CASE WHEN hashrate > 0 THEN hashrate END), 0)                                                   AS averageHashrate,
-				   COALESCE(MAX(hashrate), 0)                                                                                   AS peakHashrate,
-				   COALESCE(SUM(CASE WHEN hashrate > 0 AND updated_at > started_at THEN updated_at - started_at ELSE 0 END), 0) AS cumulativeUptimeMs,
-				   COUNT(*)                                                                                                     AS totalRecords,
-				   COALESCE(SUM(CASE WHEN hashrate > 0 THEN 1 ELSE 0 END), 0)                                                   AS activeInstances
-				 FROM instance_latest
-				 WHERE updated_at >= ?`,
-			)
-			.bind(staleCutoff)
-			.first<Record<string, unknown>>();
+		const row = await this.db.prepare(`SELECT COALESCE(SUM(shares_accepted), 0) AS totalShares, COALESCE(SUM(shares_rejected), 0) AS totalSharesRejected, COALESCE(SUM(shares_accepted_lifetime), 0) AS totalSharesLifetime, COALESCE(SUM(shares_rejected_lifetime), 0) AS totalSharesRejectedLifetime, COALESCE(SUM(hashrate), 0) AS totalHashrate, COALESCE(AVG(CASE WHEN hashrate > 0 THEN hashrate END), 0) AS averageHashrate, COALESCE(MAX(hashrate), 0) AS peakHashrate, COALESCE(SUM(CASE WHEN hashrate > 0 AND updated_at > started_at THEN updated_at - started_at ELSE 0 END), 0) AS cumulativeUptimeMs, COUNT(*) AS totalRecords, COALESCE(SUM(CASE WHEN hashrate > 0 THEN 1 ELSE 0 END), 0) AS activeInstances FROM instance_latest WHERE updated_at >= ?`).bind(staleCutoff).first<Record<string, unknown>>();
 
 		const num = (k: string): number => Number(row?.[k] ?? 0) || 0;
 		const totalSharesLifetime = num("totalSharesLifetime");
@@ -184,8 +103,7 @@ export class MiningStatsStore {
 			cumulativeUptimeSeconds,
 			totalRecords: num("totalRecords"),
 			activeInstances: num("activeInstances"),
-			sharesPerSecond:
-				cumulativeUptimeSeconds > 0 ? totalSharesLifetime / cumulativeUptimeSeconds : 0,
+			sharesPerSecond: cumulativeUptimeSeconds > 0 ? totalSharesLifetime / cumulativeUptimeSeconds : 0,
 		};
 	}
 
@@ -200,45 +118,13 @@ export class MiningStatsStore {
 		const totals = await this.getTotals();
 		const timestamp = Date.now();
 		const counts = coordinatorStatus?.counts ?? {};
-		const totalInstances =
-			Number(counts.total ?? coordinatorStatus?.targetInstances ?? totals.totalRecords) || 0;
+		const totalInstances = Number(counts.total ?? coordinatorStatus?.targetInstances ?? totals.totalRecords) || 0;
 		const runningInstances = Number(counts.running ?? totals.activeInstances) || 0;
 		const stoppedInstances = Math.max(0, totalInstances - runningInstances);
 		const operation = cleanText(coordinatorStatus?.operation, "unknown", 32);
-		const configJson = coordinatorStatus?.config
-			? JSON.stringify(coordinatorStatus.config).slice(0, 4096)
-			: null;
+		const configJson = coordinatorStatus?.config ? JSON.stringify(coordinatorStatus.config).slice(0, 4096) : null;
 
-		await this.db
-			.prepare(
-				`INSERT INTO mining_status_reports
-				 (timestamp, total_instances, running_instances, stopped_instances, active_instances,
-				  total_records, total_hashrate, average_hashrate, peak_hashrate, total_shares,
-				  total_shares_lifetime, total_shares_rejected, total_shares_rejected_lifetime,
-				  rejection_rate, cumulative_uptime_seconds, shares_per_second, operation, config_json)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			)
-			.bind(
-				timestamp,
-				totalInstances,
-				runningInstances,
-				stoppedInstances,
-				totals.activeInstances,
-				totals.totalRecords,
-				totals.totalHashrate,
-				totals.averageHashrate,
-				totals.peakHashrate,
-				totals.totalShares,
-				totals.totalSharesLifetime,
-				totals.totalSharesRejected,
-				totals.totalSharesRejectedLifetime,
-				totals.rejectionRate,
-				totals.cumulativeUptimeSeconds,
-				totals.sharesPerSecond,
-				operation,
-				configJson,
-			)
-			.run();
+		await this.db.prepare(`INSERT INTO mining_status_reports (timestamp, total_instances, running_instances, stopped_instances, active_instances, total_records, total_hashrate, average_hashrate, peak_hashrate, total_shares, total_shares_lifetime, total_shares_rejected, total_shares_rejected_lifetime, rejection_rate, cumulative_uptime_seconds, shares_per_second, operation, config_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).bind(timestamp, totalInstances, runningInstances, stoppedInstances, totals.activeInstances, totals.totalRecords, totals.totalHashrate, totals.averageHashrate, totals.peakHashrate, totals.totalShares, totals.totalSharesLifetime, totals.totalSharesRejected, totals.totalSharesRejectedLifetime, totals.rejectionRate, totals.cumulativeUptimeSeconds, totals.sharesPerSecond, operation, configJson).run();
 
 		return {
 			...totals,
@@ -253,19 +139,8 @@ export class MiningStatsStore {
 
 	async getLatestStatusReport(): Promise<MiningStatusReport | null> {
 		await ensureSchema(this.db);
-		const row = await this.db
-			.prepare(
-				`SELECT timestamp, total_instances, running_instances, stopped_instances,
-				        active_instances, total_records, total_hashrate, average_hashrate,
-				        peak_hashrate, total_shares, total_shares_lifetime,
-				        total_shares_rejected, total_shares_rejected_lifetime, rejection_rate,
-				        cumulative_uptime_seconds, shares_per_second, operation, config_json
-				   FROM mining_status_reports
-				   ORDER BY timestamp DESC
-				   LIMIT 1`,
-			)
-			.first<Record<string, unknown>>();
-		if (!row) return null;
+		const row = await this.db.prepare(`SELECT timestamp, total_instances, running_instances, stopped_instances, active_instances, total_records, total_hashrate, average_hashrate, peak_hashrate, total_shares, total_shares_lifetime, total_shares_rejected, total_shares_rejected_lifetime, rejection_rate, cumulative_uptime_seconds, shares_per_second, operation, config_json FROM mining_status_reports ORDER BY timestamp DESC LIMIT 1`).first<Record<string, unknown>>();
+		if(!row) return null;
 		return mapStatusReport(row);
 	}
 
@@ -274,30 +149,7 @@ export class MiningStatsStore {
 		const targetHour = hour ?? Math.floor(Date.now() / 3_600_000) * 3_600_000;
 		const nextHour = targetHour + 3_600_000;
 
-		const r = await this.db
-			.prepare(
-				`INSERT INTO hourly_stats (hour, total_instances, avg_hashrate, peak_hashrate,
-				   total_shares_delta, rejected_shares_delta, avg_cpu_percent)
-				 SELECT ?,
-				        COALESCE(MAX(total_instances), 0),
-				        COALESCE(AVG(total_hashrate), 0),
-				        COALESCE(MAX(total_hashrate), 0),
-				        COALESCE(MAX(total_shares_lifetime) - MIN(total_shares_lifetime), 0),
-				        COALESCE(MAX(total_shares_rejected_lifetime) - MIN(total_shares_rejected_lifetime), 0),
-				        0
-				   FROM mining_status_reports
-				  WHERE timestamp >= ? AND timestamp < ?
-				 HAVING COUNT(*) > 0
-				 ON CONFLICT (hour) DO UPDATE SET
-				   total_instances        = excluded.total_instances,
-				   avg_hashrate           = excluded.avg_hashrate,
-				   peak_hashrate          = excluded.peak_hashrate,
-				   total_shares_delta     = excluded.total_shares_delta,
-				   rejected_shares_delta  = excluded.rejected_shares_delta,
-				   avg_cpu_percent        = excluded.avg_cpu_percent`,
-			)
-			.bind(targetHour, targetHour, nextHour)
-			.run();
+		const r = await this.db.prepare(`INSERT INTO hourly_stats (hour, total_instances, avg_hashrate, peak_hashrate, total_shares_delta, rejected_shares_delta, avg_cpu_percent) SELECT ?, COALESCE(MAX(total_instances), 0), COALESCE(AVG(total_hashrate), 0), COALESCE(MAX(total_hashrate), 0), COALESCE(MAX(total_shares_lifetime) - MIN(total_shares_lifetime), 0), COALESCE(MAX(total_shares_rejected_lifetime) - MIN(total_shares_rejected_lifetime), 0), 0 FROM mining_status_reports WHERE timestamp >= ? AND timestamp < ? HAVING COUNT(*) > 0 ON CONFLICT (hour) DO UPDATE SET total_instances = excluded.total_instances, avg_hashrate = excluded.avg_hashrate, peak_hashrate = excluded.peak_hashrate, total_shares_delta = excluded.total_shares_delta, rejected_shares_delta = excluded.rejected_shares_delta, avg_cpu_percent = excluded.avg_cpu_percent`).bind(targetHour, targetHour, nextHour).run();
 
 		return r.meta?.changes ?? 0;
 	}
@@ -305,30 +157,21 @@ export class MiningStatsStore {
 	async pruneStatusReports(retentionHours = STATUS_REPORT_RETENTION_HOURS): Promise<number> {
 		await ensureSchema(this.db);
 		const cutoff = Date.now() - retentionHours * 3_600_000;
-		const r = await this.db
-			.prepare("DELETE FROM mining_status_reports WHERE timestamp < ?")
-			.bind(cutoff)
-			.run();
+		const r = await this.db.prepare("DELETE FROM mining_status_reports WHERE timestamp < ?").bind(cutoff).run();
 		return r.meta?.changes ?? 0;
 	}
 
 	async pruneStaleInstances(staleMinutes = 10): Promise<number> {
 		await ensureSchema(this.db);
 		const cutoff = Date.now() - staleMinutes * 60_000;
-		const r = await this.db
-			.prepare("DELETE FROM instance_latest WHERE updated_at < ?")
-			.bind(cutoff)
-			.run();
+		const r = await this.db.prepare("DELETE FROM instance_latest WHERE updated_at < ?").bind(cutoff).run();
 		return r.meta?.changes ?? 0;
 	}
 
 	async pruneHourlyStats(retentionDays = HOURLY_STATS_RETENTION_DAYS): Promise<number> {
 		await ensureSchema(this.db);
 		const cutoff = Date.now() - retentionDays * 24 * 3_600_000;
-		const r = await this.db
-			.prepare("DELETE FROM hourly_stats WHERE hour < ?")
-			.bind(cutoff)
-			.run();
+		const r = await this.db.prepare("DELETE FROM hourly_stats WHERE hour < ?").bind(cutoff).run();
 		return r.meta?.changes ?? 0;
 	}
 
@@ -366,12 +209,10 @@ export class MiningStatsStore {
 				"shares_accepted_lifetime",
 				"shares_rejected_lifetime",
 			];
-			const r = await this.db
-				.prepare("PRAGMA table_info(instance_latest)")
-				.all<{ name: string }>();
+			const r = await this.db.prepare("PRAGMA table_info(instance_latest)").all<{ name: string }>();
 			const cols = new Set((r.results ?? []).map((row) => row.name));
 			return expected.every((c) => cols.has(c));
-		} catch {
+		}catch{
 			return false;
 		}
 	}
@@ -384,84 +225,25 @@ async function ensureColumn(
 	definition: string,
 ): Promise<void> {
 	try {
-		const info = await db
-			.prepare(`PRAGMA table_info(${table})`)
-			.all<{ name: string }>();
+		const info = await db.prepare(`PRAGMA table_info(${table})`).all<{ name: string }>();
 		const present = (info.results ?? []).some((row) => row.name === column);
-		if (!present) {
-			await db
-				.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`)
-				.run();
+		if(!present){
+			await db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`).run();
 		}
-	} catch {
+	}catch{
 
 	}
 }
 
 async function ensureSchema(db: D1Like): Promise<void> {
-	if (schemaReady) return;
+	if(schemaReady) return;
 	await db.batch([
-		db.prepare(
-			`CREATE TABLE IF NOT EXISTS instance_latest (
-				instance_id              TEXT PRIMARY KEY,
-				timestamp                INTEGER NOT NULL,
-				hashrate                 REAL NOT NULL DEFAULT 0,
-				shares_accepted          INTEGER NOT NULL DEFAULT 0,
-				shares_rejected          INTEGER NOT NULL DEFAULT 0,
-				cpu_percent              REAL,
-				pool                     TEXT,
-				connection_status        TEXT,
-				updated_at               INTEGER NOT NULL,
-				started_at               INTEGER NOT NULL DEFAULT 0,
-				shares_accepted_lifetime INTEGER NOT NULL DEFAULT 0,
-				shares_rejected_lifetime INTEGER NOT NULL DEFAULT 0
-			)`,
-		),
-		db.prepare(
-			"CREATE INDEX IF NOT EXISTS idx_instance_latest_updated_at ON instance_latest(updated_at)",
-		),
-		db.prepare(
-			`CREATE INDEX IF NOT EXISTS idx_instance_latest_active
-			   ON instance_latest(updated_at)
-			   WHERE hashrate > 0`,
-		),
-		db.prepare(
-			`CREATE TABLE IF NOT EXISTS mining_status_reports (
-				id                              INTEGER PRIMARY KEY AUTOINCREMENT,
-				timestamp                       INTEGER NOT NULL,
-				total_instances                 INTEGER NOT NULL DEFAULT 0,
-				running_instances               INTEGER NOT NULL DEFAULT 0,
-				stopped_instances               INTEGER NOT NULL DEFAULT 0,
-				active_instances                INTEGER NOT NULL DEFAULT 0,
-				total_records                   INTEGER NOT NULL DEFAULT 0,
-				total_hashrate                  REAL NOT NULL DEFAULT 0,
-				average_hashrate                REAL NOT NULL DEFAULT 0,
-				peak_hashrate                   REAL NOT NULL DEFAULT 0,
-				total_shares                    INTEGER NOT NULL DEFAULT 0,
-				total_shares_lifetime           INTEGER NOT NULL DEFAULT 0,
-				total_shares_rejected           INTEGER NOT NULL DEFAULT 0,
-				total_shares_rejected_lifetime  INTEGER NOT NULL DEFAULT 0,
-				rejection_rate                  REAL NOT NULL DEFAULT 0,
-				cumulative_uptime_seconds       INTEGER NOT NULL DEFAULT 0,
-				shares_per_second               REAL NOT NULL DEFAULT 0,
-				operation                       TEXT NOT NULL DEFAULT 'unknown',
-				config_json                     TEXT
-			)`,
-		),
-		db.prepare(
-			"CREATE INDEX IF NOT EXISTS idx_mining_status_reports_timestamp ON mining_status_reports(timestamp DESC)",
-		),
-		db.prepare(
-			`CREATE TABLE IF NOT EXISTS hourly_stats (
-				hour                  INTEGER PRIMARY KEY,
-				total_instances       INTEGER NOT NULL DEFAULT 0,
-				avg_hashrate          REAL NOT NULL DEFAULT 0,
-				peak_hashrate         REAL NOT NULL DEFAULT 0,
-				total_shares_delta    INTEGER NOT NULL DEFAULT 0,
-				rejected_shares_delta INTEGER NOT NULL DEFAULT 0,
-				avg_cpu_percent       REAL NOT NULL DEFAULT 0
-			)`,
-		),
+		db.prepare(`CREATE TABLE IF NOT EXISTS instance_latest ( instance_id TEXT PRIMARY KEY, timestamp INTEGER NOT NULL, hashrate REAL NOT NULL DEFAULT 0, shares_accepted INTEGER NOT NULL DEFAULT 0, shares_rejected INTEGER NOT NULL DEFAULT 0, cpu_percent REAL, pool TEXT, connection_status TEXT, updated_at INTEGER NOT NULL, started_at INTEGER NOT NULL DEFAULT 0, shares_accepted_lifetime INTEGER NOT NULL DEFAULT 0, shares_rejected_lifetime INTEGER NOT NULL DEFAULT 0 )`),
+		db.prepare("CREATE INDEX IF NOT EXISTS idx_instance_latest_updated_at ON instance_latest(updated_at)"),
+		db.prepare(`CREATE INDEX IF NOT EXISTS idx_instance_latest_active ON instance_latest(updated_at) WHERE hashrate > 0`),
+		db.prepare(`CREATE TABLE IF NOT EXISTS mining_status_reports ( id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp INTEGER NOT NULL, total_instances INTEGER NOT NULL DEFAULT 0, running_instances INTEGER NOT NULL DEFAULT 0, stopped_instances INTEGER NOT NULL DEFAULT 0, active_instances INTEGER NOT NULL DEFAULT 0, total_records INTEGER NOT NULL DEFAULT 0, total_hashrate REAL NOT NULL DEFAULT 0, average_hashrate REAL NOT NULL DEFAULT 0, peak_hashrate REAL NOT NULL DEFAULT 0, total_shares INTEGER NOT NULL DEFAULT 0, total_shares_lifetime INTEGER NOT NULL DEFAULT 0, total_shares_rejected INTEGER NOT NULL DEFAULT 0, total_shares_rejected_lifetime INTEGER NOT NULL DEFAULT 0, rejection_rate REAL NOT NULL DEFAULT 0, cumulative_uptime_seconds INTEGER NOT NULL DEFAULT 0, shares_per_second REAL NOT NULL DEFAULT 0, operation TEXT NOT NULL DEFAULT 'unknown', config_json TEXT )`),
+		db.prepare("CREATE INDEX IF NOT EXISTS idx_mining_status_reports_timestamp ON mining_status_reports(timestamp DESC)"),
+		db.prepare(`CREATE TABLE IF NOT EXISTS hourly_stats ( hour INTEGER PRIMARY KEY, total_instances INTEGER NOT NULL DEFAULT 0, avg_hashrate REAL NOT NULL DEFAULT 0, peak_hashrate REAL NOT NULL DEFAULT 0, total_shares_delta INTEGER NOT NULL DEFAULT 0, rejected_shares_delta INTEGER NOT NULL DEFAULT 0, avg_cpu_percent REAL NOT NULL DEFAULT 0 )`),
 	]);
 
 	await ensureColumn(
@@ -493,13 +275,10 @@ async function ensureSchema(db: D1Like): Promise<void> {
 
 function mapStatusReport(row: Record<string, unknown>): MiningStatusReport {
 	let config: unknown = null;
-	if (row.config_json) {
+	if(row.config_json){
 		try {
-			config =
-				typeof row.config_json === "string"
-					? JSON.parse(row.config_json)
-					: row.config_json;
-		} catch {
+			config = typeof row.config_json === "string" ? JSON.parse(row.config_json) : row.config_json;
+		}catch{
 			config = null;
 		}
 	}
@@ -546,17 +325,17 @@ function toNonNegativeInteger(value: unknown): number {
 
 function toNullablePercent(value: unknown): number | null {
 	const n = Number(value);
-	if (!Number.isFinite(n)) return null;
+	if(!Number.isFinite(n)) return null;
 	return Math.min(100, Math.max(0, n));
 }
 
 function cleanText(value: unknown, fallback: string, maxLength: number): string {
-	if (typeof value !== "string" || value.trim() === "") return fallback;
+	if(typeof value !== "string" || value.trim() === "") return fallback;
 	return value.trim().slice(0, maxLength);
 }
 
 function cleanNullableText(value: unknown, maxLength: number): string | null {
-	if (typeof value !== "string" || value.trim() === "") return null;
+	if(typeof value !== "string" || value.trim() === "") return null;
 	return value.trim().slice(0, maxLength);
 }
 
@@ -565,7 +344,7 @@ export async function processHeartbeats(
 	payloads: Array<Record<string, unknown>>,
 	colo: string | null,
 ): Promise<void> {
-	if (payloads.length === 0) return;
+	if(payloads.length === 0) return;
 	const receivedAt = Date.now();
 
 	const stats = new MiningStatsStore(env.DB);
@@ -579,8 +358,7 @@ export async function processHeartbeats(
 				sharesRejected: heartbeatNumeric(p.sharesRejected),
 				cpuPercent: heartbeatNumeric(p.cpuPercent),
 				pool: typeof p.pool === "string" ? p.pool : undefined,
-				connectionStatus:
-					typeof p.connectionStatus === "string" ? p.connectionStatus : undefined,
+				connectionStatus: typeof p.connectionStatus === "string" ? p.connectionStatus : undefined,
 			})),
 		)
 		.catch((err: Error) => {
@@ -594,36 +372,16 @@ export async function processHeartbeats(
 
 	try {
 		const dataset = env.HEARTBEATS as AnalyticsEngineDataset | undefined;
-		if (dataset && typeof dataset.writeDataPoint === "function") {
-			for (const p of payloads) {
+		if(dataset && typeof dataset.writeDataPoint === "function"){
+			for(const p of payloads){
 				dataset.writeDataPoint({
-					indexes: [
-						typeof p.instanceId === "string" ? p.instanceId.slice(0, 96) : "unknown",
-					],
-					blobs: [
-						typeof p.instanceId === "string" ? p.instanceId.slice(0, 128) : "unknown",
-						typeof p.pool === "string" ? p.pool.slice(0, 256) : "",
-						typeof p.connectionStatus === "string"
-							? p.connectionStatus.slice(0, 64)
-							: "",
-						colo ?? "",
-						typeof p.poolState === "string" ? p.poolState.slice(0, 64) : "",
-						typeof p.tlsStatus === "string" ? p.tlsStatus.slice(0, 64) : "",
-						typeof p.tuningProfile === "string"
-							? p.tuningProfile.slice(0, 64)
-							: "",
-					],
-					doubles: [
-						Number(p.hashrate) || 0,
-						Number(p.sharesAccepted) || 0,
-						Number(p.sharesRejected) || 0,
-						Number(p.cpuPercent) || 0,
-						Number(p.timestamp) || receivedAt,
-					],
+					indexes: [typeof p.instanceId === "string" ? p.instanceId.slice(0, 96) : "unknown"],
+					blobs: [typeof p.instanceId === "string" ? p.instanceId.slice(0, 128) : "unknown", typeof p.pool === "string" ? p.pool.slice(0, 256) : "", typeof p.connectionStatus === "string" ? p.connectionStatus.slice(0, 64) : "", colo ?? "", typeof p.poolState === "string" ? p.poolState.slice(0, 64) : "", typeof p.tlsStatus === "string" ? p.tlsStatus.slice(0, 64) : "", typeof p.tuningProfile === "string" ? p.tuningProfile.slice(0, 64) : ""],
+					doubles: [Number(p.hashrate) || 0, Number(p.sharesAccepted) || 0, Number(p.sharesRejected) || 0, Number(p.cpuPercent) || 0, Number(p.timestamp) || receivedAt],
 				});
 			}
 		}
-	} catch (err) {
+	}catch(err){
 		heartbeatLog(
 			"warn",
 			{ err: (err as Error).message },
@@ -642,32 +400,24 @@ async function coordinatorHeartbeat(
 	const id = env.MINER_COORDINATOR.idFromName("global-coordinator");
 	const coordinator = env.MINER_COORDINATOR.get(id);
 	const headers: Record<string, string> = { "Content-Type": "application/json" };
-	if (colo) headers["X-Colo"] = colo;
+	if(colo) headers["X-Colo"] = colo;
 	const response = await coordinator.fetch("http://internal/heartbeat", {
 		method: "POST",
 		headers,
-		body: JSON.stringify({
-			instanceId: latest.instanceId ?? "unknown",
-			hashrate: latest.hashrate,
-			colo,
-			timestamp: latest.timestamp ?? Date.now(),
-		}),
+		body: JSON.stringify({ instanceId: latest.instanceId ?? "unknown", hashrate: latest.hashrate, colo, timestamp: latest.timestamp ?? Date.now() }),
 	});
-	if (!response.ok) {
+	if(!response.ok){
 		let detail = "";
 		try {
 			detail = (await response.text()).slice(0, 256);
-		} catch {
-
+		}catch{
 		}
-		throw new Error(
-			`coordinator heartbeat failed: ${response.status}${detail ? ` ${detail}` : ""}`,
-		);
+		throw new Error(`coordinator heartbeat failed: ${response.status}${detail ? ` ${detail}` : ""}`);
 	}
 }
 
 function heartbeatNumeric(v: unknown): number | undefined {
-	if (v === undefined || v === null) return undefined;
+	if(v === undefined || v === null) return undefined;
 	const n = Number(v);
 	return Number.isFinite(n) ? n : undefined;
 }
@@ -680,6 +430,6 @@ function heartbeatLog(level: "warn" | "error", fields: Record<string, unknown>, 
 		...fields,
 		msg,
 	});
-	if (level === "error") console.error(payload);
+	if(level === "error") console.error(payload);
 	else console.warn(payload);
 }
