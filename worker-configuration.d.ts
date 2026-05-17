@@ -1,7 +1,5 @@
 import type { Sandbox } from "@cloudflare/sandbox";
-
 export {};
-
 declare global {
 	interface Env {
 		MINER_COORDINATOR: DurableObjectNamespace;
