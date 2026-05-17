@@ -42,7 +42,7 @@
       "constraints": {
         "tier": 1,
         "regions": [
-          "ME"
+          "OC"
       }
     }
   ],
@@ -62,7 +62,7 @@
     {
       "binding": "DB",
       "database_name": "miner-metrics",
-      "database_id": ""
+      "database_id": "6bbcee7c-ad41-4aa5-81d0-9a9a0c2e24b2"
     }
   ],
   "analytics_engine_datasets": [
