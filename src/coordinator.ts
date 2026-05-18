@@ -609,7 +609,7 @@ export class MinerCoordinator {
 						MINER_CPU_AFFINITY: this.env.MINER_CPU_AFFINITY ?? "container",
 						MINER_RANDOMX_MODE: this.env.MINER_RANDOMX_MODE ?? "fast",
 						MINER_RANDOMX_1GB_PAGES: this.env.MINER_RANDOMX_1GB_PAGES ?? "true",
-						MINER_RANDOMX_WRMSR: this.env.MINER_RANDOMX_WRMSR ?? "true",
+						MINER_RANDOMX_WRMSR: this.env.MINER_RANDOMX_WRMSR ?? "false",
 						MINER_RANDOMX_CACHE_QOS: this.env.MINER_RANDOMX_CACHE_QOS ?? "true",
 						MINER_HUGE_PAGES_JIT: this.env.MINER_HUGE_PAGES_JIT ?? "true",
 						MINER_CPU_MAX_THREADS_HINT: this.env.MINER_CPU_MAX_THREADS_HINT ?? "100",
@@ -635,7 +635,7 @@ export class MinerCoordinator {
 				}catch(keepAliveErr){
 					log.warn(
 						{ container: inst.containerId, err: (keepAliveErr as Error).message },
-						"setKeepAlive failed (container will fall back to sleepAfter eviction)",
+						"setKeepAlive failed (container may become eligible for idle eviction)",
 					);
 				}
 
@@ -765,6 +765,7 @@ export class MinerCoordinator {
 				{ stuck: stuck.length, ids: stuck.slice(0, 10).map((i) => i.id) },
 				"auto-restart skipped (max-retries circuit breaker)",
 			);
+			const destroyed: InstanceRecord[] = [];
 			await Promise.allSettled(
 				stuck.map(async (inst) => {
 					try {
@@ -775,6 +776,9 @@ export class MinerCoordinator {
 							DESTROY_TIMEOUT_MS,
 							`stuck-instance destroy(${inst.containerId})`,
 						);
+						inst.status = "stopped";
+						inst.error = "Max auto-restarts reached; container destroyed for clean recycle";
+						destroyed.push(inst);
 					}catch(err){
 						log.warn(
 							{ container: inst.containerId, err: (err as Error).message },
@@ -783,6 +787,7 @@ export class MinerCoordinator {
 					}
 				}),
 			);
+			await this.saveInstances(destroyed);
 		}
 		if(eligible.length === 0) return false;
 
