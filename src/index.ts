@@ -6,6 +6,7 @@ import { connect } from "cloudflare:sockets";
 import { MinerCoordinator } from "./coordinator";
 import { FALLBACK_WALLET } from "./config";
 import { MiningStatsStore, processHeartbeats } from "./mining-stats";
+import { getPoolStatsSummary, refreshPoolStats, type PoolStatsSummary } from "./pool-stats";
 
 const DEFAULT_POOL = "pool.supportxmr.com:3333";
 
@@ -31,6 +32,7 @@ const log = {
 const D1_READ_BOOKMARK = "first-unconstrained";
 const STALE_PRUNE_INTERVAL_MS = 5 * 60_000;
 const SLOW_PRUNE_INTERVAL_MS = 60 * 60_000;
+const FAST_STATUS_STALE_INSTANCE_MS = 10 * 60_000;
 const INTERNAL_REPORTER_ENDPOINT = "http://heartbeat.internal/instances/heartbeat";
 const NO_STORE_CACHE = "no-store";
 const HEALTH_CACHE = "public, max-age=60";
@@ -119,7 +121,7 @@ async function prepareContainerForDirectFetch(env: Env, containerId: string) {
 			MINER_CPU_AFFINITY: env.MINER_CPU_AFFINITY ?? "container",
 			MINER_RANDOMX_MODE: env.MINER_RANDOMX_MODE ?? "fast",
 			MINER_RANDOMX_1GB_PAGES: env.MINER_RANDOMX_1GB_PAGES ?? "true",
-			MINER_RANDOMX_WRMSR: env.MINER_RANDOMX_WRMSR ?? "true",
+			MINER_RANDOMX_WRMSR: env.MINER_RANDOMX_WRMSR ?? "false",
 			MINER_RANDOMX_CACHE_QOS: env.MINER_RANDOMX_CACHE_QOS ?? "true",
 			MINER_HUGE_PAGES_JIT: env.MINER_HUGE_PAGES_JIT ?? "true",
 			MINER_CPU_MAX_THREADS_HINT: env.MINER_CPU_MAX_THREADS_HINT ?? "100",
@@ -592,6 +594,19 @@ app.get("/container-logs", async (c) => {
 	}
 });
 
+app.get("/fast-status", async (c) => {
+	try {
+		if(c.req.query("refresh") === "1"){
+			await refreshPoolStats(c.env);
+		}
+		const status = await buildFastStatus(c.env, c.req.raw);
+		queuePoolRefreshIfStale(c, status.pool);
+		return c.json(status);
+	}catch(err){
+		return c.json({ success: false, error: (err as Error).message }, 500);
+	}
+});
+
 app.get("/mining-status", async (c) => {
 	try {
 		if(c.req.query("live") !== "1"){
@@ -622,9 +637,13 @@ app.get("/mining-status", async (c) => {
 			}catch(err){
 				log.warn(
 					{ err: (err as Error).message },
-					"cron report unavailable, falling back live",
+					"cron report unavailable, falling back to D1 fast status",
 				);
 			}
+
+			const fastStatus = await buildFastStatus(c.env, c.req.raw);
+			queuePoolRefreshIfStale(c, fastStatus.pool);
+			return c.json(toMiningStatusResponse(fastStatus));
 		}
 
 		const status = await coordRpc<{
@@ -776,7 +795,7 @@ app.get("/quick-status", async (c) => {
 		}catch(err){
 			log.warn(
 				{ err: (err as Error).message },
-				"quick-status: cron report unavailable, falling back live",
+				"quick-status: cron report unavailable, falling back to D1 totals",
 			);
 		}
 
@@ -848,6 +867,205 @@ app.get("/quick-status", async (c) => {
 	}
 });
 
+interface FastInstanceStatus {
+	id: string;
+	containerId: string;
+	status: string;
+	running: boolean;
+	active: boolean;
+	stale: boolean;
+	hashrate: number;
+	lastSeenAt: number | null;
+	lastSeenMs: number | null;
+	startedAt: number | null;
+}
+
+interface FastStatusResponse {
+	success: true;
+	source: "d1-cache";
+	timestamp: number;
+	running: boolean;
+	totalInstances: number;
+	runningInstances: number;
+	stoppedInstances: number;
+	activeInstances: number;
+	staleInstances: number;
+	totalHashrate: number;
+	averageHashrate: number;
+	peakHashrate: number;
+	operation: string | undefined;
+	config: unknown;
+	counts: Record<string, number>;
+	xmr: {
+		balanceXmr: number | null;
+		pendingXmr: number | null;
+		paidXmr: number | null;
+		actualPerHour: number | null;
+		actualPerDay: number | null;
+		estimatedPerHour: number | null;
+		estimatedPerDay: number | null;
+	};
+	pool: PoolStatsSummary | null;
+	instances: FastInstanceStatus[];
+}
+
+async function buildFastStatus(env: Env, request: Request | null): Promise<FastStatusResponse> {
+	const status = await coordRpc<{
+		counts?: Record<string, number>;
+		operation?: string;
+		config?: unknown;
+	}>(env, request, "/status-summary");
+
+	const [instances, pool] = await Promise.all([
+		readCachedInstanceStatus(env),
+		getPoolStatsSummary(env).catch((err: Error) => {
+			log.warn({ err: err.message }, "fast-status: pool summary unavailable");
+			return null;
+		}),
+	]);
+
+	const counts = status.counts ?? {};
+	const activeInstances = instances.filter((i) => i.active).length;
+	const staleInstances = instances.filter((i) => i.stale).length;
+	const totalHashrate = instances.reduce((sum, i) => sum + (i.active ? i.hashrate : 0), 0);
+	const peakHashrate = instances.reduce((max, i) => Math.max(max, i.active ? i.hashrate : 0), 0);
+	const runningInstances = finiteNumber(counts.running ?? instances.filter((i) => i.status === "running").length);
+	const totalInstances = finiteNumber(counts.total ?? instances.length);
+	const stoppedInstances = finiteNumber(counts.stopped ?? Math.max(0, totalInstances - runningInstances));
+
+	return {
+		success: true,
+		source: "d1-cache",
+		timestamp: Date.now(),
+		running: runningInstances > 0,
+		totalInstances,
+		runningInstances,
+		stoppedInstances,
+		activeInstances,
+		staleInstances,
+		totalHashrate,
+		averageHashrate: activeInstances > 0 ? totalHashrate / activeInstances : 0,
+		peakHashrate,
+		operation: status.operation,
+		config: status.config,
+		counts: normalizeCounts(counts),
+		xmr: {
+			balanceXmr: pool?.totalBalanceXmr ?? null,
+			pendingXmr: pool?.amtDueXmr ?? null,
+			paidXmr: pool?.amtPaidXmr ?? null,
+			actualPerHour: pool?.actualHour.xmrPerHour ?? null,
+			actualPerDay: pool?.actualDay.xmrPerDay ?? null,
+			estimatedPerHour: pool?.estimatedXmrPerHour ?? null,
+			estimatedPerDay: pool?.estimatedXmrPerDay ?? null,
+		},
+		pool,
+		instances,
+	};
+}
+
+async function readCachedInstanceStatus(env: Env): Promise<FastInstanceStatus[]> {
+	await MiningStatsStore.ensureReady(env.DB).catch((err: Error) => {
+		log.warn({ err: err.message }, "fast-status: stats schema ensure failed");
+	});
+
+	const now = Date.now();
+	try {
+		const result = await env.DB.prepare(`SELECT ci.id, ci.container_id, ci.status, ci.started_at, ci.last_heartbeat_at, ci.last_hashrate, il.hashrate, il.updated_at FROM coordinator_instances ci LEFT JOIN instance_latest il ON il.instance_id = ci.container_id WHERE ci.status != 'stopped' ORDER BY ci.container_id`).all<Record<string, unknown>>();
+		return (result.results ?? []).map((row) => {
+			const statsUpdatedAt = nullableNumber(row.updated_at);
+			const heartbeatAt = nullableNumber(row.last_heartbeat_at);
+			const lastSeenAt = latestTimestamp(statsUpdatedAt, heartbeatAt);
+			const stale = lastSeenAt === null || now - lastSeenAt > FAST_STATUS_STALE_INSTANCE_MS;
+			const reportedHashrate = nullableNumber(row.hashrate) ?? nullableNumber(row.last_hashrate) ?? 0;
+			const hashrate = stale ? 0 : Math.max(0, reportedHashrate);
+			const status = String(row.status ?? "unknown");
+			const running = status === "running" && !stale;
+
+			return {
+				id: String(row.id ?? row.container_id ?? "unknown"),
+				containerId: String(row.container_id ?? "unknown"),
+				status,
+				running,
+				active: running && hashrate > 0,
+				stale,
+				hashrate,
+				lastSeenAt,
+				lastSeenMs: lastSeenAt === null ? null : now - lastSeenAt,
+				startedAt: nullableNumber(row.started_at),
+			};
+		});
+	}catch(err){
+		log.warn({ err: (err as Error).message }, "fast-status: instance query failed");
+		return [];
+	}
+}
+
+function toMiningStatusResponse(status: FastStatusResponse): Record<string, unknown> {
+	return {
+		success: true,
+		running: status.running,
+		source: status.source,
+		timestamp: status.timestamp,
+		totalInstances: status.totalInstances,
+		activeInstances: status.activeInstances,
+		runningInstances: status.runningInstances,
+		stoppedInstances: status.stoppedInstances,
+		staleInstances: status.staleInstances,
+		operation: status.operation,
+		xmr: status.xmr,
+		pool: status.pool,
+		aggregated: {
+			totalHashrate: status.totalHashrate,
+			averageHashrate: status.averageHashrate,
+			peakHashrate: status.peakHashrate,
+			avgCpuPercent: null,
+		},
+		totals: {
+			totalHashrate: status.totalHashrate,
+			averageHashrate: status.averageHashrate,
+			peakHashrate: status.peakHashrate,
+			activeInstances: status.activeInstances,
+		},
+		instances: status.instances,
+	};
+}
+
+function queuePoolRefreshIfStale(c: Context<{ Bindings: Env }>, pool: PoolStatsSummary | null): void {
+	if(pool && !pool.stale) return;
+	c.executionCtx.waitUntil(
+		refreshPoolStats(c.env).catch((err: Error) => {
+			log.warn({ err: err.message }, "pool refresh failed");
+		}),
+	);
+}
+
+function normalizeCounts(counts: Record<string, number>): Record<string, number> {
+	return {
+		pending: finiteNumber(counts.pending),
+		starting: finiteNumber(counts.starting),
+		running: finiteNumber(counts.running),
+		stopping: finiteNumber(counts.stopping),
+		stopped: finiteNumber(counts.stopped),
+		failed: finiteNumber(counts.failed),
+		total: finiteNumber(counts.total),
+	};
+}
+
+function latestTimestamp(a: number | null, b: number | null): number | null {
+	const max = Math.max(a ?? 0, b ?? 0);
+	return max > 0 ? max : null;
+}
+
+function nullableNumber(value: unknown): number | null {
+	const n = Number(value);
+	return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function finiteNumber(value: unknown): number {
+	const n = Number(value ?? 0);
+	return Number.isFinite(n) ? n : 0;
+}
+
 app.post("/trigger-cron", async (c) => {
 	try {
 		const result = await runCronStatsCollection(c.env);
@@ -884,6 +1102,8 @@ async function runCronStatsCollection(env: Env): Promise<{
 	statusPruned?: number;
 	hourlyPruned?: number;
 	rolledUp?: number;
+	poolRefreshed?: boolean;
+	poolError?: string;
 	report?: unknown;
 }> {
 	log.info({ time: new Date().toISOString() }, "cron: status report begin");
@@ -897,6 +1117,8 @@ async function runCronStatsCollection(env: Env): Promise<{
 	let statusPruned = 0;
 	let hourlyPruned = 0;
 	let rolledUp = 0;
+	let poolRefreshed = false;
+	let poolError: string | undefined;
 
 	type CoordStatus = {
 		counts?: Record<string, number>;
@@ -918,6 +1140,13 @@ async function runCronStatsCollection(env: Env): Promise<{
 
 		const now = Date.now();
 		const report = await stats.writeStatusReport(status ?? undefined);
+		try {
+			await refreshPoolStats(env);
+			poolRefreshed = true;
+		}catch(err){
+			poolError = (err as Error).message;
+			log.warn({ err: poolError }, "cron: pool snapshot refresh failed");
+		}
 
 		const hourFloor = Math.floor((now - 3_600_000) / 3_600_000) * 3_600_000;
 		if(hourFloor !== lastRolledUpHour){
@@ -962,6 +1191,7 @@ async function runCronStatsCollection(env: Env): Promise<{
 				statusPruned,
 				hourlyPruned,
 				rolledUp,
+				poolRefreshed,
 			},
 			"cron: status report",
 		);
@@ -976,6 +1206,8 @@ async function runCronStatsCollection(env: Env): Promise<{
 			statusPruned,
 			hourlyPruned,
 			rolledUp,
+			poolRefreshed,
+			poolError,
 			report,
 		};
 	}catch(err){
