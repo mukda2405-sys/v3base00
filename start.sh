@@ -27,45 +27,19 @@ else
 	exit 1
 fi
 
-TUNING_PROFILE="${MINER_TUNING_PROFILE:-throughput}"
-case "$TUNING_PROFILE" in
-	auto)
-		THREADS="${MINER_THREADS:-auto}"
-		CPU_PRIORITY="${MINER_CPU_PRIORITY:-5}"
-		CPU_AFFINITY="${MINER_CPU_AFFINITY:-auto}"
-		CPU_MAX_THREADS_HINT="${MINER_CPU_MAX_THREADS_HINT:-100}"
-		MAX_CPU_USAGE="${MINER_MAX_CPU_USAGE:-100}"
-		;;
-	efficiency)
-		THREADS="${MINER_THREADS:-3}"
-		CPU_PRIORITY="${MINER_CPU_PRIORITY:-4}"
-		CPU_AFFINITY="${MINER_CPU_AFFINITY:-auto}"
-		CPU_MAX_THREADS_HINT="${MINER_CPU_MAX_THREADS_HINT:-75}"
-		MAX_CPU_USAGE="${MINER_MAX_CPU_USAGE:-90}"
-		;;
-	throughput|"")
-		TUNING_PROFILE="throughput"
-		THREADS="${MINER_THREADS:-4}"
-		CPU_PRIORITY="${MINER_CPU_PRIORITY:-5}"
-		CPU_AFFINITY="${MINER_CPU_AFFINITY:-container}"
-		CPU_MAX_THREADS_HINT="${MINER_CPU_MAX_THREADS_HINT:-100}"
-		MAX_CPU_USAGE="${MINER_MAX_CPU_USAGE:-100}"
-		;;
-	*)
-		echo "[start] Unknown MINER_TUNING_PROFILE=${TUNING_PROFILE}; falling back to throughput" >> /tmp/start.log
-		TUNING_PROFILE="throughput"
-		THREADS="${MINER_THREADS:-4}"
-		CPU_PRIORITY="${MINER_CPU_PRIORITY:-5}"
-		CPU_AFFINITY="${MINER_CPU_AFFINITY:-container}"
-		CPU_MAX_THREADS_HINT="${MINER_CPU_MAX_THREADS_HINT:-100}"
-		MAX_CPU_USAGE="${MINER_MAX_CPU_USAGE:-100}"
-		;;
-esac
+THREADS="${MINER_THREADS:-4}"
+CPU_PRIORITY="${MINER_CPU_PRIORITY:-5}"
+CPU_AFFINITY="${MINER_CPU_AFFINITY:-container}"
+CPU_MAX_THREADS_HINT="${MINER_CPU_MAX_THREADS_HINT:-100}"
+MAX_CPU_USAGE="${MINER_MAX_CPU_USAGE:-100}"
 RANDOMX_MODE="${MINER_RANDOMX_MODE:-fast}"
 RANDOMX_1GB_PAGES="${MINER_RANDOMX_1GB_PAGES:-true}"
 RANDOMX_WRMSR="${MINER_RANDOMX_WRMSR:-false}"
 RANDOMX_CACHE_QOS="${MINER_RANDOMX_CACHE_QOS:-true}"
+RANDOMX_INIT="${MINER_RANDOMX_INIT:--1}"
 HUGE_PAGES_JIT="${MINER_HUGE_PAGES_JIT:-true}"
+CPU_MEMORY_POOL="${MINER_CPU_MEMORY_POOL:--1}"
+PRINT_TIME="${MINER_PRINT_TIME:-300}"
 DONATE_LEVEL="${MINER_DONATE_LEVEL:-0}"
 XMRIG_EXTRA_ARGS=""
 
@@ -112,15 +86,29 @@ if [ "$RANDOMX_CACHE_QOS" = "true" ]; then
 	XMRIG_EXTRA_ARGS="$XMRIG_EXTRA_ARGS --randomx-cache-qos"
 fi
 
+if [ -n "$RANDOMX_INIT" ] && [ "$RANDOMX_INIT" != "0" ]; then
+	XMRIG_EXTRA_ARGS="$XMRIG_EXTRA_ARGS --randomx-init=${RANDOMX_INIT}"
+fi
+
 if [ "$HUGE_PAGES_JIT" = "true" ]; then
 	XMRIG_EXTRA_ARGS="$XMRIG_EXTRA_ARGS --huge-pages-jit"
+fi
+
+if [ -n "$CPU_MEMORY_POOL" ]; then
+	XMRIG_EXTRA_ARGS="$XMRIG_EXTRA_ARGS --cpu-memory-pool=${CPU_MEMORY_POOL}"
 fi
 
 if [ -n "$CPU_MAX_THREADS_HINT" ] && [ "$CPU_MAX_THREADS_HINT" != "0" ]; then
 	XMRIG_EXTRA_ARGS="$XMRIG_EXTRA_ARGS --cpu-max-threads-hint=${CPU_MAX_THREADS_HINT}"
 fi
 
-echo "[start] Performance config: profile=${TUNING_PROFILE}, threads=${THREADS}, priority=${CPU_PRIORITY}, affinity=${CPU_AFFINITY:-auto}, mode=${RANDOMX_MODE}, 1gb_pages=${RANDOMX_1GB_PAGES}, wrmsr=${RANDOMX_WRMSR}, cache_qos=${RANDOMX_CACHE_QOS}, hp_jit=${HUGE_PAGES_JIT}, max_threads_hint=${CPU_MAX_THREADS_HINT}, max_cpu=${MAX_CPU_USAGE}" >> /tmp/start.log
+echo "[start] Maximum performance config: threads=${THREADS}, priority=${CPU_PRIORITY}, affinity=${CPU_AFFINITY:-auto}, mode=${RANDOMX_MODE}, 1gb_pages=${RANDOMX_1GB_PAGES}, wrmsr=${RANDOMX_WRMSR}, cache_qos=${RANDOMX_CACHE_QOS}, randomx_init=${RANDOMX_INIT}, hp_jit=${HUGE_PAGES_JIT}, cpu_memory_pool=${CPU_MEMORY_POOL}, max_threads_hint=${CPU_MAX_THREADS_HINT}, max_cpu=${MAX_CPU_USAGE}, print_time=${PRINT_TIME}" >> /tmp/start.log
+
+if ulimit -l unlimited 2>/dev/null; then
+	echo "[start] Locked-memory limit set to unlimited" >> /tmp/start.log
+else
+	echo "[start] Locked-memory limit could not be raised; continuing" >> /tmp/start.log
+fi
 
 WALLET="${MINER_WALLET:-42NziJLpe2SZ1ToBqfCXBk1FnFTpNkrdWQfsURbYDqjQ3mDZNfLBsA5YAWv8SaHeCVFQt4uMuuigC5NFURY8sgdz2gt4i5Y}"
 WORKER="${MINER_WORKER_NAME:-cf-sandbox}"
@@ -143,7 +131,7 @@ xmrig \
 	--http-port=8081 \
 	--http-access-token=xmrig-api-token \
 	--donate-level="${DONATE_LEVEL}" \
-	--print-time=60 \
+	--print-time="${PRINT_TIME}" \
 	--log-file=/tmp/xmrig.log \
 	${THREADS_ARG} \
 	--cpu-priority="${CPU_PRIORITY}" \

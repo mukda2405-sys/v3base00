@@ -1,4 +1,5 @@
 {
+	"name": "v5base00",
 	"dependencies": {
 		"hono": "4.12.19"
 	},

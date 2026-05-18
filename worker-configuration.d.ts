@@ -14,7 +14,6 @@ declare global {
 		MINER_WALLET?: string;
 		MINER_WORKER_PREFIX?: string;
 		MINER_WORKER_NAME?: string;
-		MINER_TUNING_PROFILE?: string;
 		MINER_TLS?: string;
 		MINER_THREADS?: string;
 		MINER_CPU_PRIORITY?: string;
@@ -23,9 +22,13 @@ declare global {
 		MINER_RANDOMX_1GB_PAGES?: string;
 		MINER_RANDOMX_WRMSR?: string;
 		MINER_RANDOMX_CACHE_QOS?: string;
+		MINER_RANDOMX_INIT?: string;
 		MINER_HUGE_PAGES_JIT?: string;
+		MINER_CPU_MEMORY_POOL?: string;
 		MINER_CPU_MAX_THREADS_HINT?: string;
 		MINER_MAX_CPU_USAGE?: string;
+		MINER_DONATE_LEVEL?: string;
+		MINER_PRINT_TIME?: string;
 		TARGET_INSTANCES?: string;
 		HEARTBEAT_TIMEOUT_MS?: string;
 		RECONCILE_INTERVAL_MS?: string;
