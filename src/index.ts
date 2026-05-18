@@ -115,7 +115,6 @@ async function prepareContainerForDirectFetch(env: Env, containerId: string) {
 			MINER_ALGORITHM: env.MINER_ALGORITHM ?? "rx/0",
 			MINER_WALLET: env.MINER_WALLET ?? FALLBACK_WALLET,
 			MINER_WORKER_NAME: workerNameFromContainerId(containerId),
-			MINER_TUNING_PROFILE: env.MINER_TUNING_PROFILE ?? "throughput",
 			MINER_THREADS: env.MINER_THREADS ?? "4",
 			MINER_CPU_PRIORITY: env.MINER_CPU_PRIORITY ?? "5",
 			MINER_CPU_AFFINITY: env.MINER_CPU_AFFINITY ?? "container",
@@ -123,9 +122,13 @@ async function prepareContainerForDirectFetch(env: Env, containerId: string) {
 			MINER_RANDOMX_1GB_PAGES: env.MINER_RANDOMX_1GB_PAGES ?? "true",
 			MINER_RANDOMX_WRMSR: env.MINER_RANDOMX_WRMSR ?? "false",
 			MINER_RANDOMX_CACHE_QOS: env.MINER_RANDOMX_CACHE_QOS ?? "true",
+			MINER_RANDOMX_INIT: env.MINER_RANDOMX_INIT ?? "-1",
 			MINER_HUGE_PAGES_JIT: env.MINER_HUGE_PAGES_JIT ?? "true",
+			MINER_CPU_MEMORY_POOL: env.MINER_CPU_MEMORY_POOL ?? "-1",
 			MINER_CPU_MAX_THREADS_HINT: env.MINER_CPU_MAX_THREADS_HINT ?? "100",
 			MINER_MAX_CPU_USAGE: env.MINER_MAX_CPU_USAGE ?? "100",
+			MINER_DONATE_LEVEL: env.MINER_DONATE_LEVEL ?? "0",
+			MINER_PRINT_TIME: env.MINER_PRINT_TIME ?? "300",
 			REPORTER_ENDPOINT: INTERNAL_REPORTER_ENDPOINT,
 		}),
 		5000,
@@ -626,8 +629,6 @@ app.get("/mining-status", async (c) => {
 						operation: report.operation,
 						aggregated: {
 							totalHashrate: report.totalHashrate,
-							totalSharesAccepted: report.totalSharesLifetime,
-							totalSharesRejected: report.totalSharesRejectedLifetime,
 							avgCpuPercent: null,
 						},
 						totals: report,
@@ -673,7 +674,7 @@ app.get("/mining-status", async (c) => {
 					5000,
 				);
 				if(result.status === 200){
-					const s = (await result.json()) as Record<string, unknown>;
+					const s = stripShareFields(await result.json()) as Record<string, unknown>;
 					return {
 						containerId: inst.containerId,
 						status: "running",
@@ -698,8 +699,6 @@ app.get("/mining-status", async (c) => {
 		});
 
 		let totalHashrate = 0;
-		let totalSharesAccepted = 0;
-		let totalSharesRejected = 0;
 		let totalCpuPercent = 0;
 		let activeInstances = 0;
 		const instanceStats: Array<{
@@ -716,8 +715,6 @@ app.get("/mining-status", async (c) => {
 			if(r._agg){
 				const agg = r._agg as Record<string, unknown>;
 				totalHashrate += Number(agg.hashrate) || 0;
-				totalSharesAccepted += Number(agg.sharesAccepted) || 0;
-				totalSharesRejected += Number(agg.sharesRejected) || 0;
 				totalCpuPercent += Number(agg.cpuPercent) || 0;
 				activeInstances++;
 			}
@@ -730,8 +727,6 @@ app.get("/mining-status", async (c) => {
 			activeInstances,
 			aggregated: {
 				totalHashrate,
-				totalSharesAccepted,
-				totalSharesRejected,
 				avgCpuPercent: activeInstances > 0 ? totalCpuPercent / activeInstances : 0,
 			},
 			instances: instanceStats,
@@ -776,17 +771,11 @@ app.get("/quick-status", async (c) => {
 					totalInstances: report.totalInstances,
 					runningInstances: report.runningInstances,
 					stoppedInstances: report.stoppedInstances,
-					totalShares: report.totalShares,
-					totalSharesLifetime: report.totalSharesLifetime,
-					totalSharesRejected: report.totalSharesRejected,
-					totalSharesRejectedLifetime: report.totalSharesRejectedLifetime,
-					rejectionRate: report.rejectionRate,
 					totalHashrate: report.totalHashrate,
 					averageHashrate: report.averageHashrate,
 					peakHashrate: report.peakHashrate,
 					totalRecords: report.totalRecords,
 					cumulativeUptimeSeconds: report.cumulativeUptimeSeconds,
-					sharesPerSecond: report.sharesPerSecond,
 					activeInstances: report.activeInstances,
 					operation: report.operation,
 					config: report.config,
@@ -818,18 +807,12 @@ app.get("/quick-status", async (c) => {
 		const totalCount = counts.total ?? 0;
 
 		let totals = {
-			totalShares: 0,
-			totalSharesLifetime: 0,
-			totalSharesRejected: 0,
-			totalSharesRejectedLifetime: 0,
-			rejectionRate: 0,
 			totalHashrate: 0,
 			averageHashrate: 0,
 			peakHashrate: 0,
 			totalRecords: 0,
 			cumulativeUptimeSeconds: 0,
 			activeInstances: 0,
-			sharesPerSecond: 0,
 		};
 		try {
 			const stats = await readStatsStore(c.env);
@@ -847,17 +830,11 @@ app.get("/quick-status", async (c) => {
 			totalInstances: totalCount,
 			runningInstances: runningCount,
 			stoppedInstances: totalCount - runningCount,
-			totalShares: totals.totalShares,
-			totalSharesLifetime: totals.totalSharesLifetime,
-			totalSharesRejected: totals.totalSharesRejected,
-			totalSharesRejectedLifetime: totals.totalSharesRejectedLifetime,
-			rejectionRate: totals.rejectionRate,
 			totalHashrate: totals.totalHashrate,
 			averageHashrate: totals.averageHashrate,
 			peakHashrate: totals.peakHashrate,
 			totalRecords: totals.totalRecords,
 			cumulativeUptimeSeconds: totals.cumulativeUptimeSeconds,
-			sharesPerSecond: totals.sharesPerSecond,
 			activeInstances: totals.activeInstances,
 			operation: status.operation,
 			config: status.config,
@@ -1066,6 +1043,17 @@ function finiteNumber(value: unknown): number {
 	return Number.isFinite(n) ? n : 0;
 }
 
+function stripShareFields(value: unknown): unknown {
+	if(Array.isArray(value)) return value.map(stripShareFields);
+	if(value === null || typeof value !== "object") return value;
+	const cleaned: Record<string, unknown> = {};
+	for(const [key, entry] of Object.entries(value as Record<string, unknown>)){
+		if(key.toLowerCase().includes("share")) continue;
+		cleaned[key] = stripShareFields(entry);
+	}
+	return cleaned;
+}
+
 app.post("/trigger-cron", async (c) => {
 	try {
 		const result = await runCronStatsCollection(c.env);
@@ -1097,7 +1085,6 @@ async function runCronStatsCollection(env: Env): Promise<{
 	message: string;
 	sampled?: number;
 	totalHashrate?: number;
-	totalShares?: number;
 	stalePruned?: number;
 	statusPruned?: number;
 	hourlyPruned?: number;
@@ -1201,7 +1188,6 @@ async function runCronStatsCollection(env: Env): Promise<{
 			message: "cron status report written",
 			sampled: report.activeInstances,
 			totalHashrate: report.totalHashrate,
-			totalShares: report.totalSharesLifetime,
 			stalePruned,
 			statusPruned,
 			hourlyPruned,

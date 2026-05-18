@@ -5,8 +5,6 @@ export interface PoolBalanceSnapshot {
 	wallet: string;
 	poolHashrate: number;
 	lastHashAt: number | null;
-	validShares: number;
-	invalidShares: number;
 	amtDueXmr: number;
 	amtPaidXmr: number;
 	totalBalanceXmr: number;
@@ -77,8 +75,6 @@ export class PoolStatsStore {
 			wallet,
 			poolHashrate: numeric(miner.hash),
 			lastHashAt: timestampValue(miner.lastHash),
-			validShares: numeric(miner.validShares),
-			invalidShares: numeric(miner.invalidShares),
 			amtDueXmr,
 			amtPaidXmr,
 			totalBalanceXmr: amtDueXmr + amtPaidXmr,
@@ -86,7 +82,7 @@ export class PoolStatsStore {
 			blockRewardXmr,
 		};
 
-		await this.db.prepare(`INSERT INTO pool_balance_snapshots (wallet, timestamp, pool_hashrate, last_hash_at, valid_shares, invalid_shares, amt_due_xmr, amt_paid_xmr, total_balance_xmr, network_hashrate, block_reward_xmr) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(wallet, timestamp) DO UPDATE SET pool_hashrate = excluded.pool_hashrate, last_hash_at = excluded.last_hash_at, valid_shares = excluded.valid_shares, invalid_shares = excluded.invalid_shares, amt_due_xmr = excluded.amt_due_xmr, amt_paid_xmr = excluded.amt_paid_xmr, total_balance_xmr = excluded.total_balance_xmr, network_hashrate = excluded.network_hashrate, block_reward_xmr = excluded.block_reward_xmr`).bind(snapshot.wallet, snapshot.timestamp, snapshot.poolHashrate, snapshot.lastHashAt, snapshot.validShares, snapshot.invalidShares, snapshot.amtDueXmr, snapshot.amtPaidXmr, snapshot.totalBalanceXmr, snapshot.networkHashrate, snapshot.blockRewardXmr).run();
+		await this.db.prepare(`INSERT INTO pool_balance_snapshots (wallet, timestamp, pool_hashrate, last_hash_at, amt_due_xmr, amt_paid_xmr, total_balance_xmr, network_hashrate, block_reward_xmr) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(wallet, timestamp) DO UPDATE SET pool_hashrate = excluded.pool_hashrate, last_hash_at = excluded.last_hash_at, amt_due_xmr = excluded.amt_due_xmr, amt_paid_xmr = excluded.amt_paid_xmr, total_balance_xmr = excluded.total_balance_xmr, network_hashrate = excluded.network_hashrate, block_reward_xmr = excluded.block_reward_xmr`).bind(snapshot.wallet, snapshot.timestamp, snapshot.poolHashrate, snapshot.lastHashAt, snapshot.amtDueXmr, snapshot.amtPaidXmr, snapshot.totalBalanceXmr, snapshot.networkHashrate, snapshot.blockRewardXmr).run();
 
 		await this.pruneOld(timestamp - SNAPSHOT_RETENTION_MS).catch((err: Error) => {
 			console.warn(JSON.stringify({ level: "warn", service: "pool-stats", err: err.message, msg: "snapshot prune failed" }));
@@ -97,7 +93,7 @@ export class PoolStatsStore {
 
 	async getLatest(wallet: string): Promise<PoolBalanceSnapshot | null> {
 		await ensureSchema(this.db);
-		const row = await this.db.prepare(`SELECT wallet, timestamp, pool_hashrate, last_hash_at, valid_shares, invalid_shares, amt_due_xmr, amt_paid_xmr, total_balance_xmr, network_hashrate, block_reward_xmr FROM pool_balance_snapshots WHERE wallet = ? ORDER BY timestamp DESC LIMIT 1`).bind(wallet).first<Record<string, unknown>>();
+		const row = await this.db.prepare(`SELECT wallet, timestamp, pool_hashrate, last_hash_at, amt_due_xmr, amt_paid_xmr, total_balance_xmr, network_hashrate, block_reward_xmr FROM pool_balance_snapshots WHERE wallet = ? ORDER BY timestamp DESC LIMIT 1`).bind(wallet).first<Record<string, unknown>>();
 		return row ? rowToSnapshot(row) : null;
 	}
 
@@ -124,9 +120,9 @@ export class PoolStatsStore {
 	}
 
 	private async getBaseline(wallet: string, targetTimestamp: number): Promise<PoolBalanceSnapshot | null> {
-		let row = await this.db.prepare(`SELECT wallet, timestamp, pool_hashrate, last_hash_at, valid_shares, invalid_shares, amt_due_xmr, amt_paid_xmr, total_balance_xmr, network_hashrate, block_reward_xmr FROM pool_balance_snapshots WHERE wallet = ? AND timestamp <= ? ORDER BY timestamp DESC LIMIT 1`).bind(wallet, targetTimestamp).first<Record<string, unknown>>();
+		let row = await this.db.prepare(`SELECT wallet, timestamp, pool_hashrate, last_hash_at, amt_due_xmr, amt_paid_xmr, total_balance_xmr, network_hashrate, block_reward_xmr FROM pool_balance_snapshots WHERE wallet = ? AND timestamp <= ? ORDER BY timestamp DESC LIMIT 1`).bind(wallet, targetTimestamp).first<Record<string, unknown>>();
 		if(!row){
-			row = await this.db.prepare(`SELECT wallet, timestamp, pool_hashrate, last_hash_at, valid_shares, invalid_shares, amt_due_xmr, amt_paid_xmr, total_balance_xmr, network_hashrate, block_reward_xmr FROM pool_balance_snapshots WHERE wallet = ? ORDER BY timestamp ASC LIMIT 1`).bind(wallet).first<Record<string, unknown>>();
+			row = await this.db.prepare(`SELECT wallet, timestamp, pool_hashrate, last_hash_at, amt_due_xmr, amt_paid_xmr, total_balance_xmr, network_hashrate, block_reward_xmr FROM pool_balance_snapshots WHERE wallet = ? ORDER BY timestamp ASC LIMIT 1`).bind(wallet).first<Record<string, unknown>>();
 		}
 		return row ? rowToSnapshot(row) : null;
 	}
@@ -148,7 +144,7 @@ export async function getPoolStatsSummary(env: Env): Promise<PoolStatsSummary | 
 async function ensureSchema(db: D1Like): Promise<void> {
 	if(schemaReady) return;
 	await db.batch([
-		db.prepare(`CREATE TABLE IF NOT EXISTS pool_balance_snapshots ( wallet TEXT NOT NULL, timestamp INTEGER NOT NULL, pool_hashrate REAL NOT NULL DEFAULT 0, last_hash_at INTEGER, valid_shares REAL NOT NULL DEFAULT 0, invalid_shares REAL NOT NULL DEFAULT 0, amt_due_xmr REAL NOT NULL DEFAULT 0, amt_paid_xmr REAL NOT NULL DEFAULT 0, total_balance_xmr REAL NOT NULL DEFAULT 0, network_hashrate REAL, block_reward_xmr REAL, PRIMARY KEY (wallet, timestamp) )`),
+		db.prepare(`CREATE TABLE IF NOT EXISTS pool_balance_snapshots ( wallet TEXT NOT NULL, timestamp INTEGER NOT NULL, pool_hashrate REAL NOT NULL DEFAULT 0, last_hash_at INTEGER, amt_due_xmr REAL NOT NULL DEFAULT 0, amt_paid_xmr REAL NOT NULL DEFAULT 0, total_balance_xmr REAL NOT NULL DEFAULT 0, network_hashrate REAL, block_reward_xmr REAL, PRIMARY KEY (wallet, timestamp) )`),
 		db.prepare("CREATE INDEX IF NOT EXISTS idx_pool_balance_snapshots_wallet_timestamp ON pool_balance_snapshots(wallet, timestamp DESC)"),
 	]);
 	schemaReady = true;
@@ -179,8 +175,6 @@ function rowToSnapshot(row: Record<string, unknown>): PoolBalanceSnapshot {
 		timestamp: numeric(row.timestamp),
 		poolHashrate: numeric(row.pool_hashrate),
 		lastHashAt: row.last_hash_at == null ? null : numeric(row.last_hash_at),
-		validShares: numeric(row.valid_shares),
-		invalidShares: numeric(row.invalid_shares),
 		amtDueXmr: numeric(row.amt_due_xmr),
 		amtPaidXmr: numeric(row.amt_paid_xmr),
 		totalBalanceXmr: numeric(row.total_balance_xmr),
