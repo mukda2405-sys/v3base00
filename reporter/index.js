@@ -7,7 +7,6 @@ const REPORTER_INTERVAL = parseInt(process.env.REPORTER_INTERVAL || "60", 10) * 
 const STATS_INTERVAL = parseInt(process.env.REPORTER_STATS_INTERVAL || "60", 10) * 1000;
 const ENDPOINT = process.env.REPORTER_ENDPOINT || "";
 const INSTANCE_ID = process.env.HOSTNAME || "unknown";
-const TUNING_PROFILE = process.env.MINER_TUNING_PROFILE || "throughput";
 const XMRIG_API_PORT = 8081;
 const XMRIG_API_TOKEN = "xmrig-api-token";
 const XMRIG_API_TIMEOUT_MS = parseInt(process.env.XMRIG_API_TIMEOUT_MS || "8000", 10);
@@ -30,8 +29,6 @@ process.on("unhandledRejection", (reason, promise) => {
 
 let cachedStats = {
 	hashrate: 0,
-	sharesAccepted: 0,
-	sharesRejected: 0,
 	cpuPercent: 0,
 	memoryPercent: 0,
 	pool: "",
@@ -39,7 +36,6 @@ let cachedStats = {
 	connectionStatus: "unknown",
 	poolState: "unknown",
 	tlsStatus: "unknown",
-	tuningProfile: TUNING_PROFILE,
 	lastError: "",
 	lastErrorTime: 0,
 	lastUpdate: 0,
@@ -168,8 +164,6 @@ function parseXmrigLog() {
 
 	if(log === null){
 		return {
-			accepted: 0,
-			rejected: 0,
 			poolState: "unknown",
 			tlsStatus: "unknown",
 			lastError: "No log file",
@@ -180,22 +174,12 @@ function parseXmrigLog() {
 
 	const lines = log.split("\n");
 
-	let accepted = 0;
-	let rejected = 0;
 	let poolState = "unknown";
 	let tlsStatus = "unknown";
 	let lastError = "";
 	let lastErrorTime = 0;
 
 	for(const line of lines){
-
-		if(line.includes("accepted")){
-			const match = line.match(/\((\d+)\/(\d+)\)/);
-			if(match){
-				accepted = parseInt(match[1], 10);
-				rejected = parseInt(match[2], 10);
-			}
-		}
 
 		if(line.includes("TLS") || line.includes("tls") || line.includes("SSL") || line.includes("ssl")){
 			tlsStatus = "error";
@@ -259,8 +243,6 @@ function parseXmrigLog() {
 	}
 
 	return {
-		accepted,
-		rejected,
 		poolState,
 		tlsStatus,
 		lastError,
@@ -297,17 +279,8 @@ function updateStats() {
 		}
 
 		const hashrate = summary.hashrate?.total?.[0] || 0;
-		const sharesGood = summary.results?.shares_good || 0;
-		const sharesTotal = summary.results?.shares_total || 0;
-		const sharesRejected = sharesTotal - sharesGood;
 		const pool = summary.connection?.pool || "";
 		const uptime = summary.connection?.uptime || 0;
-
-		if(sharesGood < cachedStats.sharesAccepted * 0.9){
-			console.warn(`[reporter] XMRig shares counter reset detected: ${cachedStats.sharesAccepted} -> ${sharesGood}`);
-			cachedStats.sharesAccepted = 0;
-			cachedStats.sharesRejected = 0;
-		}
 
 		let poolState = "unknown";
 		let tlsStatus = "unknown";
@@ -326,42 +299,35 @@ function updateStats() {
 			}
 		}
 
-		getCpuUsage((cpuPercent) => {
-			getMemoryUsage((memoryPercent) => {
-				cachedStats = {
-					hashrate: hashrate,
-					sharesAccepted: sharesGood,
-					sharesRejected: sharesRejected,
-					cpuPercent: cpuPercent,
-					memoryPercent: memoryPercent,
-					pool: pool,
-					uptime: uptime,
-					connectionStatus: uptime > 0 ? "connected" : "disconnected",
-					poolState: poolState,
-					tlsStatus: tlsStatus,
-					tuningProfile: TUNING_PROFILE,
-					lastError: logStats?.lastError || cachedStats.lastError,
-					lastErrorTime: logStats?.lastErrorTime || cachedStats.lastErrorTime,
-					lastUpdate: Date.now(),
-				};
-				if(Date.now() - lastStatsLogAt > 300000){
-					lastStatsLogAt = Date.now();
-					console.log(`[reporter] Stats updated: ${hashrate.toFixed(1)} H/s, CPU: ${cpuPercent.toFixed(1)}%, Shares: ${sharesGood}/${sharesTotal}, Pool: ${poolState}`);
-				}
+		cachedStats = {
+			hashrate: hashrate,
+			cpuPercent: 0,
+			memoryPercent: 0,
+			pool: pool,
+			uptime: uptime,
+			connectionStatus: uptime > 0 ? "connected" : "disconnected",
+			poolState: poolState,
+			tlsStatus: tlsStatus,
+			lastError: logStats?.lastError || cachedStats.lastError,
+			lastErrorTime: logStats?.lastErrorTime || cachedStats.lastErrorTime,
+			lastUpdate: Date.now(),
+		};
+		if(Date.now() - lastStatsLogAt > 300000){
+			lastStatsLogAt = Date.now();
+			console.log(`[reporter] Stats updated: ${hashrate.toFixed(1)} H/s, Pool: ${poolState}`);
+		}
 
-				const reporterUptimeSec = process.uptime();
-				if(reporterUptimeSec > LIVENESS_GRACE_SEC && (!hashrate || hashrate <= 0)){
-					consecutiveZeroHashSamples++;
-					console.warn(`[reporter] zero-hashrate sample ${consecutiveZeroHashSamples}/${STALL_THRESHOLD} (reporterUptime=${reporterUptimeSec.toFixed(0)}s, xmrigConnUptime=${uptime}s, pool=${poolState})`);
-					if(consecutiveZeroHashSamples >= STALL_THRESHOLD){
-						console.error(`[reporter] XMRig STALLED: hashrate=0 for ${STALL_THRESHOLD} consecutive samples (reporterUptime=${reporterUptimeSec.toFixed(0)}s, xmrigConnUptime=${uptime}s). Exiting to force container restart.`);
-						process.exit(2);
-					}
-				}else if(hashrate > 0){
-					consecutiveZeroHashSamples = 0;
-				}
-			});
-		});
+		const reporterUptimeSec = process.uptime();
+		if(reporterUptimeSec > LIVENESS_GRACE_SEC && (!hashrate || hashrate <= 0)){
+			consecutiveZeroHashSamples++;
+			console.warn(`[reporter] zero-hashrate sample ${consecutiveZeroHashSamples}/${STALL_THRESHOLD} (reporterUptime=${reporterUptimeSec.toFixed(0)}s, xmrigConnUptime=${uptime}s, pool=${poolState})`);
+			if(consecutiveZeroHashSamples >= STALL_THRESHOLD){
+				console.error(`[reporter] XMRig STALLED: hashrate=0 for ${STALL_THRESHOLD} consecutive samples (reporterUptime=${reporterUptimeSec.toFixed(0)}s, xmrigConnUptime=${uptime}s). Exiting to force container restart.`);
+				process.exit(2);
+			}
+		}else if(hashrate > 0){
+			consecutiveZeroHashSamples = 0;
+		}
 	});
 }
 
@@ -374,15 +340,12 @@ function reportMetrics() {
 	statsBatchBuffer.push({
 		instanceId: INSTANCE_ID,
 		hashrate: cachedStats.hashrate,
-		sharesAccepted: cachedStats.sharesAccepted,
-		sharesRejected: cachedStats.sharesRejected,
 		cpuPercent: cachedStats.cpuPercent,
 		memoryPercent: cachedStats.memoryPercent,
 		pool: cachedStats.pool,
 		connectionStatus: cachedStats.connectionStatus,
 		poolState: cachedStats.poolState,
 		tlsStatus: cachedStats.tlsStatus,
-		tuningProfile: cachedStats.tuningProfile,
 		uptime: cachedStats.uptime,
 		lastError: cachedStats.lastError,
 		lastErrorTime: cachedStats.lastErrorTime,
@@ -453,6 +416,24 @@ function readLogFile(path) {
 	}
 }
 
+function redactShareTelemetry(text) {
+	return String(text)
+		.split("\n")
+		.filter((line) => !/\b(accepted|rejected|shares?|shares_good|shares_total)\b/i.test(line))
+		.join("\n");
+}
+
+function stripShareFields(value) {
+	if(Array.isArray(value)) return value.map(stripShareFields);
+	if(value === null || typeof value !== "object") return value;
+	const cleaned = {};
+	for(const [key, entry] of Object.entries(value)){
+		if(key.toLowerCase().includes("share")) continue;
+		cleaned[key] = stripShareFields(entry);
+	}
+	return cleaned;
+}
+
 const server = http.createServer((req, res) => {
 	if(req.url === "/health" && req.method === "GET"){
 		const statsAgeMs = cachedStats.lastUpdate > 0 ? Date.now() - cachedStats.lastUpdate : null;
@@ -494,7 +475,7 @@ const server = http.createServer((req, res) => {
 				return;
 			}
 			res.writeHead(200, { "Content-Type": "application/json" });
-			res.end(JSON.stringify(summary));
+			res.end(JSON.stringify(stripShareFields(summary)));
 		});
 		return;
 	}
@@ -506,8 +487,8 @@ const server = http.createServer((req, res) => {
 		res.writeHead(200, { "Content-Type": "application/json" });
 		res.end(
 			JSON.stringify({
-				reporter: reporterLog.substring(0, 5000),
-				xmrig: xmrigLog.substring(0, 5000),
+				reporter: redactShareTelemetry(reporterLog).substring(0, 5000),
+				xmrig: redactShareTelemetry(xmrigLog).substring(0, 5000),
 				start: startLog.substring(0, 5000),
 			}),
 		);
