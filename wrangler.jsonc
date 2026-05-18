@@ -1,10 +1,10 @@
 {
 	"$schema": "./node_modules/wrangler/config-schema.json",
-	"name": "v5base00",
+	"name": "v6website05",
 	"main": "src/index.ts",
 	"compatibility_date": "2026-04-20",
 	"compatibility_flags": ["nodejs_compat"],
-	"account_id": "e2c572e12b3730aab98f3e06226fe619",
+	"account_id": "dfa6f07da4201eb00e3a1a8e3b86ce90",
 	"workers_dev": true,
 	"preview_urls": false,
 	"triggers": {
@@ -19,26 +19,11 @@
 	},
 	"placement": {
 		"mode": "targeted",
-		"hostname": "v5base00.fragrant-cake-f995.workers.dev"
+		"hostname": "v6website05.012345.workers.dev"
 	},
 	"vars": {
 		"SANDBOX_TRANSPORT": "rpc",
-		"API_KEY": "m9jeXyoL12OKSGqIoCwauEoPS6I31YNm9jCWohvLXsWQ2ipn",
-		"REPORTER_ENDPOINT": "https://v5base00.fragrant-cake-f995.workers.dev/instances/heartbeat",
-		"MINER_THREADS": "4",
-		"MINER_CPU_PRIORITY": "5",
-		"MINER_CPU_AFFINITY": "container",
-		"MINER_RANDOMX_MODE": "fast",
-		"MINER_RANDOMX_1GB_PAGES": "true",
-		"MINER_RANDOMX_WRMSR": "false",
-		"MINER_RANDOMX_CACHE_QOS": "true",
-		"MINER_RANDOMX_INIT": "-1",
-		"MINER_HUGE_PAGES_JIT": "true",
-		"MINER_CPU_MEMORY_POOL": "-1",
-		"MINER_CPU_MAX_THREADS_HINT": "100",
-		"MINER_MAX_CPU_USAGE": "100",
-		"MINER_DONATE_LEVEL": "0",
-		"MINER_PRINT_TIME": "300"
+		"API_KEY": "m9jeXyoL12OKSGqIoCwauEoPS6I31YNm9jCWohvLXsWQ2ipn"
 	},
 	"containers": [
 		{
@@ -78,7 +63,7 @@
 		{
 			"binding": "DB",
 			"database_name": "miner-metrics",
-			"database_id": "1b150a3b-2b6c-4516-96d8-8b5b28515adb"
+			"database_id": "977d5347-803e-45c6-bda9-7a73176e9d66"
 		}
 	],
 	"analytics_engine_datasets": [
