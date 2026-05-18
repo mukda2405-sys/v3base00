@@ -6,7 +6,6 @@ export { ContainerProxy };
 const INTERNAL_HEARTBEAT_HOST = "heartbeat.internal";
 
 export class MinerSandbox extends Sandbox {
-	sleepAfter = 31_536_000;
 	enableInternet = true;
 	interceptHttps = false;
 	defaultPort = 8080;
@@ -19,7 +18,7 @@ export class MinerSandbox extends Sandbox {
 		MINER_TUNING_PROFILE: "throughput",
 		MINER_THREADS: "4",
 		MINER_CPU_PRIORITY: "5",
-		MINER_CPU_AFFINITY: "0xF",
+		MINER_CPU_AFFINITY: "container",
 		MINER_RANDOMX_MODE: "fast",
 		MINER_RANDOMX_1GB_PAGES: "true",
 		MINER_RANDOMX_WRMSR: "false",
@@ -90,30 +89,28 @@ async function heartbeatOutboundHandler(
 ): Promise<Response> {
 	const url = new URL(request.url);
 	let expectedHost: string | null = null;
-	if (env.REPORTER_ENDPOINT) {
+	if(env.REPORTER_ENDPOINT){
 		try {
 			expectedHost = new URL(env.REPORTER_ENDPOINT).host;
-		} catch {
+		}catch{
 		}
 	}
 
-	const hostAllowed =
-		url.host === INTERNAL_HEARTBEAT_HOST ||
-		(expectedHost !== null && url.host === expectedHost);
-	if (request.method !== "POST" || url.pathname !== "/instances/heartbeat" || !hostAllowed) {
+	const hostAllowed = url.host === INTERNAL_HEARTBEAT_HOST || (expectedHost !== null && url.host === expectedHost);
+	if(request.method !== "POST" || url.pathname !== "/instances/heartbeat" || !hostAllowed){
 		return fetch(request);
 	}
 
 	let raw: unknown;
 	try {
 		raw = await request.json();
-	} catch {
+	}catch{
 		return Response.json(
 			{ acknowledged: false, error: "invalid heartbeat body" },
 			{ status: 400 },
 		);
 	}
-	if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+	if(raw === null || typeof raw !== "object" || Array.isArray(raw)){
 		return Response.json(
 			{ acknowledged: false, error: "invalid heartbeat body" },
 			{ status: 400 },
@@ -121,10 +118,7 @@ async function heartbeatOutboundHandler(
 	}
 	const body = raw as { batch?: unknown[]; [key: string]: unknown };
 
-	const payloads: Array<Record<string, unknown>> =
-		Array.isArray(body.batch) && body.batch.length > 0
-			? (body.batch as Array<Record<string, unknown>>)
-			: [body as Record<string, unknown>];
+	const payloads: Array<Record<string, unknown>> = Array.isArray(body.batch) && body.batch.length > 0 ? (body.batch as Array<Record<string, unknown>>) : [body as Record<string, unknown>];
 
 	const cfRay = request.headers.get("CF-Ray") ?? "";
 	const colo = cfRay.split("-")[1] ?? null;
@@ -132,7 +126,7 @@ async function heartbeatOutboundHandler(
 	try {
 		await processHeartbeats(env, payloads, colo);
 		return Response.json({ acknowledged: true, batchSize: payloads.length });
-	} catch (err) {
+	}catch(err){
 
 		return Response.json(
 			{
