@@ -40,10 +40,10 @@
 			"rollout_step_percentage": 5,
 			"constraints": {
 				"regions": [
-					"ENAM",
-					"WNAM"
+					"EEUR",
+					"WEUR"
 				],
-				"jurisdiction": "fedramp"
+				"jurisdiction": "et"
 			}
 		}
 	],
