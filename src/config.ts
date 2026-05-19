@@ -32,6 +32,64 @@ export const TUNING_DEFAULTS: CoordinatorTuning = {
 	logLevel: "info",
 };
 
+export const INTERNAL_HEARTBEAT_HOST = "heartbeat.internal";
+export const INTERNAL_REPORTER_ENDPOINT = `http://${INTERNAL_HEARTBEAT_HOST}/instances/heartbeat`;
+
+const MAX_HASH_MINER_ENV = {
+	MINER_THREADS: "7",
+	MINER_CPU_PRIORITY: "5",
+	MINER_CPU_AFFINITY: "0xF",
+	MINER_RANDOMX_MODE: "fast",
+	MINER_RANDOMX_1GB_PAGES: "true",
+	MINER_RANDOMX_WRMSR: "false",
+	MINER_RANDOMX_CACHE_QOS: "true",
+	MINER_RANDOMX_INIT: "-1",
+	MINER_HUGE_PAGES_JIT: "true",
+	MINER_CPU_MEMORY_POOL: "4",
+	MINER_CPU_MAX_THREADS_HINT: "100",
+	MINER_MAX_CPU_USAGE: "100",
+	MINER_DONATE_LEVEL: "0",
+	MINER_PRINT_TIME: "300",
+} as const;
+
+const REPORTER_ENV = {
+	REPORTER_ENDPOINT: INTERNAL_REPORTER_ENDPOINT,
+	REPORTER_INTERVAL: "60",
+	REPORTER_STATS_INTERVAL: "60",
+} as const;
+
+export interface ContainerMinerEnvOptions {
+	instanceId: string;
+	pool: string;
+	wallet: string;
+	algorithm: string;
+	workerName: string;
+}
+
+export function defaultSandboxEnvVars(): Record<string, string> {
+	return {
+		MINER_ALGORITHM: DEFAULTS.algorithm,
+		MINER_POOL: DEFAULTS.pool,
+		MINER_TLS: "false",
+		MINER_WALLET: DEFAULTS.wallet,
+		MINER_WORKER_NAME: DEFAULTS.workerPrefix,
+		...MAX_HASH_MINER_ENV,
+		...REPORTER_ENV,
+	};
+}
+
+export function buildContainerMinerEnv(options: ContainerMinerEnvOptions): Record<string, string> {
+	return {
+		...defaultSandboxEnvVars(),
+		INSTANCE_ID: options.instanceId,
+		HOSTNAME: options.instanceId,
+		MINER_POOL: options.pool,
+		MINER_WALLET: options.wallet,
+		MINER_ALGORITHM: options.algorithm,
+		MINER_WORKER_NAME: options.workerName,
+	};
+}
+
 function intEnv(name: string, raw: string | undefined, fallback: number): number {
 	if(raw === undefined || raw === "") return fallback;
 	const n = Number.parseInt(raw, 10);
