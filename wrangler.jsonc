@@ -1,9 +1,9 @@
 {
 	"$schema": "./node_modules/wrangler/config-schema.json",
-	"name": "v5base00",
+	"name": "victorv4e4",
 	"main": "src/index.ts",
 	"compatibility_date": "2026-04-20",
-	"compatibility_flags": ["nodejs_compat"],
+	"compatibility_flags": ["nodejs_compat_v2"],
 	"account_id": "e2c572e12b3730aab98f3e06226fe619",
 	"workers_dev": true,
 	"preview_urls": false,
@@ -23,7 +23,7 @@
 		}
 	},
 	"placement": {
-		"hostname": "v5base00.fragrant-cake-f995.workers.dev"
+		"hostname": "victorv4e4.01234-51a.workers.dev"
 	},
 	"vars": {
 		"SANDBOX_TRANSPORT": "rpc",
