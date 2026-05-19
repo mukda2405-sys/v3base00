@@ -247,6 +247,20 @@ app.post("/heal", async (c) => {
 	return c.json(result);
 });
 
+app.post("/keep-alive", async (c) => {
+	const body = (await c.req.json().catch(() => ({}))) as {
+		resetCursor?: boolean;
+	};
+	const result = await coordRpc<unknown>(
+		c.env,
+		c.req.raw,
+		"/keep-alive",
+		"POST",
+		{ resetCursor: body.resetCursor === true },
+	);
+	return c.json(result);
+});
+
 app.post("/set-pool", async (c) => {
 	const body = (await c.req.json().catch(() => ({}))) as { pool?: string };
 	if (!body.pool) {
@@ -1013,15 +1027,686 @@ async function mapLimit<T, R>(
 	return results;
 }
 
+interface AbuseSandboxLimits {
+	maxRuntimeMs: number;
+	safetyMarginMs: number;
+	maxItemsPerRun: number;
+	maxInstances: number;
+	maxCpuUnits: number;
+	maxMemoryMiB: number;
+	maxDiskMiB: number;
+	allowedRegions: ReadonlySet<string>;
+	allowedCommands: ReadonlySet<string>;
+	healthyHeartbeatMs: number;
+	staleHeartbeatMs: number;
+	maxRestartAttempts: number;
+}
+
+type AbuseInstanceState =
+	| "pending"
+	| "running"
+	| "stale"
+	| "failed"
+	| "quarantined";
+
+interface AbuseInstanceRecord {
+	id: string;
+	state: AbuseInstanceState;
+	startedAt: number | null;
+	lastHeartbeatAt: number | null;
+	restartAttempts: number;
+	processedItems: number;
+	error?: string;
+}
+
+interface AbuseWorkCursor {
+	nextOffset: number;
+	completed: boolean;
+}
+
+interface AbuseSandboxRequest {
+	action: "start" | "status" | "restart-failed" | "prune-stale";
+	instanceId?: string;
+	targetInstances?: number;
+	cpuUnits?: number;
+	memoryMiB?: number;
+	diskMiB?: number;
+	region?: string;
+	command?: string;
+	keepalive?: boolean;
+}
+
+interface AbuseHeartbeatPayload {
+	instanceId?: unknown;
+	timestamp?: unknown;
+	processedItems?: unknown;
+	reportedTotalInstances?: unknown;
+	state?: unknown;
+}
+
+export interface AbuseSimulationResult {
+	name: string;
+	passed: boolean;
+	detail: string;
+}
+
+interface AbuseSimulationLoopSnapshot {
+	iteration: number;
+	timestamp: number;
+	isoTime: string;
+	trigger: string;
+	success: boolean;
+	passedCount: number;
+	failedCount: number;
+	failedNames: string[];
+	results: AbuseSimulationResult[];
+}
+
+interface AbuseSimulationLoopStatus {
+	mode: "scheduled";
+	running: boolean;
+	manuallyStopped: boolean;
+	intervalMs: number;
+	startedAt: number | null;
+	startedAtIso: string | null;
+	stoppedAt: number | null;
+	stoppedAtIso: string | null;
+	uptimeMs: number | null;
+	iterations: number;
+	lastRunAt: number | null;
+	lastRunAtIso: string | null;
+	lastSuccess: boolean | null;
+	lastResults: AbuseSimulationResult[];
+	lastSnapshot: AbuseSimulationLoopSnapshot | null;
+	nextRunAt: number | null;
+	nextRunAtIso: string | null;
+}
+
+interface AbuseSimulationStoreState {
+	manuallyStopped: boolean;
+	startedAt: number | null;
+	stoppedAt: number | null;
+	iterations: number;
+	lastRunAt: number | null;
+	nextRunAt: number | null;
+	lastSnapshot: AbuseSimulationLoopSnapshot | null;
+}
+
+const ABUSE_SIMULATION_LIMITS: AbuseSandboxLimits = {
+	maxRuntimeMs: 250,
+	safetyMarginMs: 50,
+	maxItemsPerRun: 25,
+	maxInstances: 3,
+	maxCpuUnits: 2,
+	maxMemoryMiB: 512,
+	maxDiskMiB: 1024,
+	allowedRegions: new Set(["local-a", "local-b"]),
+	allowedCommands: new Set(["run-worker"]),
+	healthyHeartbeatMs: 1_000,
+	staleHeartbeatMs: 3_000,
+	maxRestartAttempts: 2,
+};
+
+const ABUSE_FORBIDDEN_REQUEST_FIELDS: ReadonlyArray<keyof AbuseSandboxRequest> = [
+	"targetInstances",
+	"cpuUnits",
+	"memoryMiB",
+	"diskMiB",
+	"region",
+	"command",
+	"keepalive",
+];
+const ABUSE_SIMULATION_LOOP_INTERVAL_MS = 60_000;
+let abuseSimulationSchemaReady = false;
+
+class AbuseToySandbox {
+	private readonly instances = new Map<string, AbuseInstanceRecord>();
+	private readonly cursors = new Map<string, AbuseWorkCursor>();
+
+	constructor(private readonly limits: AbuseSandboxLimits) {}
+
+	handleRequest(request: AbuseSandboxRequest): {
+		accepted: boolean;
+		reason: string;
+	} {
+		for (const field of ABUSE_FORBIDDEN_REQUEST_FIELDS) {
+			if (request[field] !== undefined) {
+				return {
+					accepted: false,
+					reason: `rejected forbidden caller-controlled field: ${field}`,
+				};
+			}
+		}
+
+		if (
+			request.instanceId !== undefined &&
+			!isSafeAbuseSimulationId(request.instanceId)
+		) {
+			return { accepted: false, reason: "rejected invalid instanceId" };
+		}
+
+		return { accepted: true, reason: `accepted safe action: ${request.action}` };
+	}
+
+	startInstance(id: string, now: number): { started: boolean; reason: string } {
+		if (!isSafeAbuseSimulationId(id)) {
+			return { started: false, reason: "invalid instance id" };
+		}
+
+		const activeCount = this.countStates(["pending", "running", "stale"]);
+		if (activeCount >= this.limits.maxInstances) {
+			return { started: false, reason: "capacity limit reached" };
+		}
+
+		this.instances.set(id, {
+			id,
+			state: "running",
+			startedAt: now,
+			lastHeartbeatAt: now,
+			restartAttempts: 0,
+			processedItems: 0,
+		});
+		this.cursors.set(id, { nextOffset: 0, completed: false });
+
+		return { started: true, reason: "started inside fake capacity limit" };
+	}
+
+	runBoundedWork(
+		id: string,
+		now: number,
+		attemptedItems: number,
+	): { processed: number; paused: boolean; reason: string } {
+		const instance = this.instances.get(id);
+		if (!instance || instance.state !== "running") {
+			return { processed: 0, paused: true, reason: "instance is not running" };
+		}
+
+		const cursor = this.cursors.get(id) ?? {
+			nextOffset: 0,
+			completed: false,
+		};
+		const fakeStopAt =
+			now + this.limits.maxRuntimeMs - this.limits.safetyMarginMs;
+		let fakeNow = now;
+		let processed = 0;
+
+		while (
+			fakeNow < fakeStopAt &&
+			processed < this.limits.maxItemsPerRun &&
+			processed < attemptedItems &&
+			!cursor.completed
+		) {
+			processed += 1;
+			cursor.nextOffset += 1;
+			fakeNow += 10;
+			cursor.completed = cursor.nextOffset >= 100;
+		}
+
+		instance.processedItems += processed;
+		this.cursors.set(id, cursor);
+
+		return {
+			processed,
+			paused: !cursor.completed,
+			reason:
+				processed < attemptedItems
+					? "bounded by fake deadline or item limit"
+					: "processed requested work",
+		};
+	}
+
+	ingestHeartbeat(
+		payload: AbuseHeartbeatPayload,
+		now: number,
+	): { accepted: boolean; reason: string } {
+		if (
+			typeof payload.instanceId !== "string" ||
+			!isSafeAbuseSimulationId(payload.instanceId)
+		) {
+			return { accepted: false, reason: "invalid heartbeat instanceId" };
+		}
+
+		if (payload.reportedTotalInstances !== undefined) {
+			return { accepted: false, reason: "rejected caller-supplied fleet total" };
+		}
+
+		const timestamp =
+			typeof payload.timestamp === "number" && Number.isFinite(payload.timestamp)
+				? payload.timestamp
+				: now;
+		if (timestamp > now + 60_000) {
+			return { accepted: false, reason: "rejected future heartbeat" };
+		}
+
+		const instance = this.instances.get(payload.instanceId);
+		if (!instance) return { accepted: false, reason: "unknown instance" };
+
+		instance.lastHeartbeatAt = timestamp;
+		if (instance.state === "stale") instance.state = "running";
+		return { accepted: true, reason: "heartbeat accepted for single instance only" };
+	}
+
+	classifyHealth(now: number): Array<AbuseInstanceRecord> {
+		for (const instance of this.instances.values()) {
+			if (instance.state === "quarantined") continue;
+
+			const age =
+				instance.lastHeartbeatAt === null
+					? Number.POSITIVE_INFINITY
+					: now - instance.lastHeartbeatAt;
+			if (age <= this.limits.healthyHeartbeatMs) instance.state = "running";
+			else if (age <= this.limits.staleHeartbeatMs) instance.state = "stale";
+			else instance.state = "failed";
+		}
+
+		return [...this.instances.values()];
+	}
+
+	restartFailed(now: number): { restarted: number; quarantined: number } {
+		let restarted = 0;
+		let quarantined = 0;
+
+		for (const instance of this.instances.values()) {
+			if (instance.state !== "failed") continue;
+
+			if (instance.restartAttempts >= this.limits.maxRestartAttempts) {
+				instance.state = "quarantined";
+				instance.error = "restart circuit breaker opened";
+				quarantined += 1;
+				continue;
+			}
+
+			instance.restartAttempts += 1;
+			instance.state = "running";
+			instance.startedAt = now;
+			instance.lastHeartbeatAt = now;
+			instance.error = undefined;
+			restarted += 1;
+		}
+
+		return { restarted, quarantined };
+	}
+
+	status(): {
+		desiredInstances: number;
+		activeInstances: number;
+		staleInstances: number;
+		failedInstances: number;
+		quarantinedInstances: number;
+	} {
+		return {
+			desiredInstances: this.limits.maxInstances,
+			activeInstances: this.countStates(["running"]),
+			staleInstances: this.countStates(["stale"]),
+			failedInstances: this.countStates(["failed"]),
+			quarantinedInstances: this.countStates(["quarantined"]),
+		};
+	}
+
+	private countStates(states: AbuseInstanceState[]): number {
+		return [...this.instances.values()].filter((instance) =>
+			states.includes(instance.state),
+		).length;
+	}
+}
+
+function isSafeAbuseSimulationId(value: string): boolean {
+	return /^[a-zA-Z0-9._-]{1,128}$/.test(value);
+}
+
+function simulateTimeoutBypassAttempt(): AbuseSimulationResult {
+	const sandbox = new AbuseToySandbox(ABUSE_SIMULATION_LIMITS);
+	sandbox.startInstance("local-worker-1", 0);
+	const result = sandbox.runBoundedWork("local-worker-1", 0, 10_000);
+
+	return {
+		name: "timeout bypass attempt",
+		passed:
+			result.processed <= ABUSE_SIMULATION_LIMITS.maxItemsPerRun &&
+			result.paused,
+		detail: result.reason,
+	};
+}
+
+function simulatePerpetualUptimeClaimAttempt(): AbuseSimulationResult {
+	const sandbox = new AbuseToySandbox(ABUSE_SIMULATION_LIMITS);
+	sandbox.startInstance("local-worker-1", 0);
+	sandbox.classifyHealth(10_000);
+	const status = sandbox.status();
+
+	return {
+		name: "perpetual uptime claim attempt",
+		passed: status.activeInstances === 0 && status.failedInstances === 1,
+		detail: `active=${status.activeInstances}, failed=${status.failedInstances}`,
+	};
+}
+
+function simulateLimitOverrideAttempt(): AbuseSimulationResult {
+	const sandbox = new AbuseToySandbox(ABUSE_SIMULATION_LIMITS);
+	const result = sandbox.handleRequest({
+		action: "start",
+		targetInstances: 999,
+		cpuUnits: 999,
+		memoryMiB: 999_999,
+		diskMiB: 999_999,
+		region: "forbidden-region",
+		command: "custom-command",
+		keepalive: true,
+	});
+
+	return {
+		name: "sandbox limit override attempt",
+		passed: !result.accepted,
+		detail: result.reason,
+	};
+}
+
+function simulateHeartbeatSpoofAttempt(): AbuseSimulationResult {
+	const sandbox = new AbuseToySandbox(ABUSE_SIMULATION_LIMITS);
+	sandbox.startInstance("local-worker-1", 0);
+	const result = sandbox.ingestHeartbeat(
+		{
+			instanceId: "local-worker-1",
+			timestamp: 10,
+			reportedTotalInstances: 999_999,
+			state: "running",
+		},
+		10,
+	);
+
+	return {
+		name: "heartbeat fleet-count spoof attempt",
+		passed: !result.accepted,
+		detail: result.reason,
+	};
+}
+
+function simulateRestartStormAttempt(): AbuseSimulationResult {
+	const sandbox = new AbuseToySandbox(ABUSE_SIMULATION_LIMITS);
+	sandbox.startInstance("local-worker-1", 0);
+
+	for (const now of [10_000, 20_000, 30_000]) {
+		sandbox.classifyHealth(now);
+		sandbox.restartFailed(now);
+	}
+
+	const status = sandbox.status();
+	return {
+		name: "restart storm attempt",
+		passed: status.quarantinedInstances === 1,
+		detail: `quarantined=${status.quarantinedInstances}`,
+	};
+}
+
+export function runAbuseSimulation(): AbuseSimulationResult[] {
+	return [
+		simulateTimeoutBypassAttempt(),
+		simulatePerpetualUptimeClaimAttempt(),
+		simulateLimitOverrideAttempt(),
+		simulateHeartbeatSpoofAttempt(),
+		simulateRestartStormAttempt(),
+	];
+}
+
+async function ensureAbuseSimulationStore(env: Env): Promise<void> {
+	if (abuseSimulationSchemaReady) return;
+	await env.DB.batch([
+		env.DB.prepare(
+			`CREATE TABLE IF NOT EXISTS abuse_simulation_state (
+				key TEXT PRIMARY KEY,
+				value TEXT NOT NULL,
+				updated_at INTEGER NOT NULL
+			)`,
+		),
+		env.DB.prepare(
+			"DROP TABLE IF EXISTS abuse_simulation_history",
+		),
+	]);
+	abuseSimulationSchemaReady = true;
+}
+
+function parseStoredNumber(value: string | undefined): number | null {
+	if (value === undefined || value === "") return null;
+	const parsed = Number(value);
+	return Number.isFinite(parsed) ? parsed : null;
+}
+
+function parseSnapshotJson(value: string | undefined): AbuseSimulationLoopSnapshot | null {
+	if (!value) return null;
+	try {
+		const parsed = JSON.parse(value) as AbuseSimulationLoopSnapshot;
+		return parsed && typeof parsed === "object" ? parsed : null;
+	} catch {
+		return null;
+	}
+}
+
+async function readAbuseSimulationState(
+	env: Env,
+): Promise<AbuseSimulationStoreState> {
+	await ensureAbuseSimulationStore(env);
+	const rows = await env.DB.prepare(
+		"SELECT key, value FROM abuse_simulation_state",
+	).all<{ key: string; value: string }>();
+	const values = new Map(
+		(rows.results ?? []).map((row) => [String(row.key), String(row.value)]),
+	);
+	return {
+		manuallyStopped: values.get("manuallyStopped") === "1",
+		startedAt: parseStoredNumber(values.get("startedAt")),
+		stoppedAt: parseStoredNumber(values.get("stoppedAt")),
+		iterations: parseStoredNumber(values.get("iterations")) ?? 0,
+		lastRunAt: parseStoredNumber(values.get("lastRunAt")),
+		nextRunAt: parseStoredNumber(values.get("nextRunAt")),
+		lastSnapshot: parseSnapshotJson(values.get("lastSnapshot")),
+	};
+}
+
+async function writeAbuseSimulationState(
+	env: Env,
+	updates: Record<string, string | number | boolean | null>,
+): Promise<void> {
+	const now = Date.now();
+	await env.DB.batch(
+		Object.entries(updates).map(([key, value]) =>
+			env.DB.prepare(
+				`INSERT INTO abuse_simulation_state (key, value, updated_at)
+				 VALUES (?, ?, ?)
+				 ON CONFLICT(key) DO UPDATE SET
+				   value = excluded.value,
+				   updated_at = excluded.updated_at`,
+			).bind(
+				key,
+				typeof value === "boolean" ? (value ? "1" : "0") : String(value ?? ""),
+				now,
+			),
+		),
+	);
+}
+
+function snapshotFromResults(
+	iteration: number,
+	timestamp: number,
+	trigger: string,
+	results: AbuseSimulationResult[],
+): AbuseSimulationLoopSnapshot {
+	const failedNames = results
+		.filter((result) => !result.passed)
+		.map((result) => result.name);
+	return {
+		iteration,
+		timestamp,
+		isoTime: new Date(timestamp).toISOString(),
+		trigger,
+		success: failedNames.length === 0,
+		passedCount: results.length - failedNames.length,
+		failedCount: failedNames.length,
+		failedNames,
+		results,
+	};
+}
+
+async function runAbuseSimulationIteration(
+	env: Env,
+	trigger: string,
+): Promise<AbuseSimulationLoopSnapshot> {
+	await ensureAbuseSimulationStore(env);
+	const state = await readAbuseSimulationState(env);
+	const timestamp = Date.now();
+	const startedAt = state.startedAt ?? timestamp;
+	const iteration = state.iterations + 1;
+	const snapshot = snapshotFromResults(
+		iteration,
+		timestamp,
+		trigger,
+		runAbuseSimulation(),
+	);
+
+	await writeAbuseSimulationState(env, {
+		manuallyStopped: false,
+		startedAt,
+		stoppedAt: null,
+		iterations: snapshot.iteration,
+		lastRunAt: timestamp,
+		nextRunAt: timestamp + ABUSE_SIMULATION_LOOP_INTERVAL_MS,
+		lastSnapshot: JSON.stringify(snapshot),
+	});
+
+	log.info(
+		{
+			iteration: snapshot.iteration,
+			trigger,
+			success: snapshot.success,
+			passedCount: snapshot.passedCount,
+			failedCount: snapshot.failedCount,
+			failedNames: snapshot.failedNames,
+		},
+		"abuse-simulation: scheduled iteration",
+	);
+	return snapshot;
+}
+
+async function maybeRunAbuseSimulation(
+	env: Env,
+	trigger: string,
+	force = false,
+): Promise<AbuseSimulationLoopSnapshot | null> {
+	const state = await readAbuseSimulationState(env);
+	if (state.manuallyStopped) return null;
+	if (!force && state.nextRunAt !== null && state.nextRunAt > Date.now()) {
+		return null;
+	}
+	return runAbuseSimulationIteration(env, trigger);
+}
+
+async function abuseSimulationLoopStatus(
+	env: Env,
+): Promise<AbuseSimulationLoopStatus> {
+	const state = await readAbuseSimulationState(env);
+	const last = state.lastSnapshot;
+	const running = !state.manuallyStopped;
+	const now = Date.now();
+	return {
+		mode: "scheduled",
+		running,
+		manuallyStopped: state.manuallyStopped,
+		intervalMs: ABUSE_SIMULATION_LOOP_INTERVAL_MS,
+		startedAt: state.startedAt,
+		startedAtIso: state.startedAt ? new Date(state.startedAt).toISOString() : null,
+		stoppedAt: state.stoppedAt,
+		stoppedAtIso: state.stoppedAt ? new Date(state.stoppedAt).toISOString() : null,
+		uptimeMs: running && state.startedAt !== null ? now - state.startedAt : null,
+		iterations: state.iterations,
+		lastRunAt: state.lastRunAt,
+		lastRunAtIso: state.lastRunAt
+			? new Date(state.lastRunAt).toISOString()
+			: null,
+		lastSuccess: last ? last.success : null,
+		lastResults: last ? last.results : [],
+		lastSnapshot: last,
+		nextRunAt: running ? state.nextRunAt : null,
+		nextRunAtIso:
+			running && state.nextRunAt ? new Date(state.nextRunAt).toISOString() : null,
+	};
+}
+
+async function startAbuseSimulationLoop(
+	env: Env,
+): Promise<AbuseSimulationLoopStatus> {
+	await runAbuseSimulationIteration(env, "manual-start");
+	return abuseSimulationLoopStatus(env);
+}
+
+async function stopAbuseSimulationLoop(
+	env: Env,
+): Promise<AbuseSimulationLoopStatus> {
+	await ensureAbuseSimulationStore(env);
+	await writeAbuseSimulationState(env, {
+		manuallyStopped: true,
+		stoppedAt: Date.now(),
+		nextRunAt: null,
+	});
+	return abuseSimulationLoopStatus(env);
+}
+
+async function runScheduledAbuseSimulation(
+	env: Env,
+	trigger: string,
+): Promise<void> {
+	try {
+		await maybeRunAbuseSimulation(env, trigger);
+	} catch (err) {
+		log.error(
+			{ err: (err as Error).message, trigger },
+			"abuse-simulation: scheduled run failed",
+		);
+	}
+}
+
+app.get("/abuse-simulation", async (c) => {
+	const snapshot = await maybeRunAbuseSimulation(c.env, "request", true);
+	return c.json({
+		success: snapshot?.success ?? false,
+		results: snapshot?.results ?? [],
+		snapshot,
+		loop: await abuseSimulationLoopStatus(c.env),
+	});
+});
+
+app.get("/abuse-simulation/status", async (c) => {
+	return c.json({ success: true, loop: await abuseSimulationLoopStatus(c.env) });
+});
+
+app.get("/abuse-simulation/history", async (c) => {
+	const loop = await abuseSimulationLoopStatus(c.env);
+	return c.json({
+		success: true,
+		message: "D1 simulation history is disabled for efficiency; only the latest snapshot is retained.",
+		history: [],
+		lastSnapshot: loop.lastSnapshot,
+	});
+});
+
+app.post("/abuse-simulation/start", async (c) => {
+	return c.json({ success: true, loop: await startAbuseSimulationLoop(c.env) });
+});
+
+app.post("/abuse-simulation/stop", async (c) => {
+	return c.json({ success: true, loop: await stopAbuseSimulationLoop(c.env) });
+});
+
 export type WorkerContext = Context<{ Bindings: Env }>;
 
 export default {
-	fetch: app.fetch,
+	fetch(request: Request, env: Env, ctx: ExecutionContext) {
+		return app.fetch(request, env, ctx);
+	},
 	async scheduled(
 		_controller: ScheduledController,
 		env: Env,
 		ctx: ExecutionContext,
 	) {
+		ctx.waitUntil(runScheduledAbuseSimulation(env, "scheduled"));
 		ctx.waitUntil(runCronStatsCollection(env).then(() => undefined));
 	},
 };

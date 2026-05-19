@@ -44,11 +44,25 @@ interface CoordinatorState {
 	config: CoordinatorConfig;
 }
 
+interface KeepAliveRefreshSummary {
+	totalRunning: number;
+	checked: number;
+	refreshed: number;
+	failed: number;
+	cursor: number;
+	nextCursor: number;
+	errors: Array<{ containerId: string; error: string }>;
+}
+
 const TARGET_INSTANCES = 375;
 const BATCH_SIZE = 50;
 const START_TIMEOUT_MS = 30_000;
 const SET_ENV_TIMEOUT_MS = 15_000;
 const KEEP_ALIVE_TIMEOUT_MS = 10_000;
+const KEEP_ALIVE_REFRESH_BATCH_SIZE = 50;
+const KEEP_ALIVE_REFRESH_INTERVAL_MS = 60_000;
+const KEEP_ALIVE_REFRESH_CURSOR_KEY = "keepAliveRefreshCursor";
+const KEEP_ALIVE_REFRESH_NEXT_AT_KEY = "keepAliveRefreshNextAt";
 const DESTROY_TIMEOUT_MS = 20_000;
 const MAX_RETRIES = 3;
 const BASE_BACKOFF_MS = 1_000;
@@ -179,6 +193,9 @@ export class MinerCoordinator {
 			if (path === "/set-pool" && request.method === "POST") {
 				return await this.handleSetPool(request);
 			}
+			if (path === "/keep-alive" && request.method === "POST") {
+				return await this.handleKeepAliveRefresh(request);
+			}
 
 			return Response.json(
 				{ success: false, error: "Not found" },
@@ -226,6 +243,7 @@ export class MinerCoordinator {
 
 			await this.processHeartbeatTimeout();
 			await this.processAutoRestart(state);
+			await this.processKeepAliveRefresh();
 
 			await this.state.storage.setAlarm(Date.now() + AUTO_RESTART_INTERVAL_MS);
 		} catch (err) {
@@ -563,6 +581,23 @@ export class MinerCoordinator {
 		});
 	}
 
+	private async handleKeepAliveRefresh(request: Request): Promise<Response> {
+		const parsed = (await request.json().catch(() => null)) as {
+			resetCursor?: unknown;
+		} | null;
+		const resetCursor = parsed?.resetCursor === true;
+		const summary = await this.refreshKeepAlive(resetCursor);
+		await this.state.storage.put(
+			KEEP_ALIVE_REFRESH_NEXT_AT_KEY,
+			Date.now() + KEEP_ALIVE_REFRESH_INTERVAL_MS,
+		);
+		return Response.json({
+			success: summary.failed === 0,
+			message: `keepAlive refreshed for ${summary.refreshed}/${summary.checked} checked containers`,
+			...summary,
+		});
+	}
+
 	private async processSpawnBatch(state: CoordinatorState): Promise<void> {
 		const all = await this.getInstances();
 		const pending = all.filter((i) => i.status === "pending");
@@ -643,6 +678,7 @@ export class MinerCoordinator {
 			try {
 				const id = this.env.MINER_CONTAINER.idFromName(inst.containerId);
 				const container = this.env.MINER_CONTAINER.get(id);
+				await this.enableContainerKeepAlive(inst.containerId, "pre-start");
 
 				await withTimeout(
 					container.setEnvVars({
@@ -664,21 +700,7 @@ export class MinerCoordinator {
 					`container.start(${inst.containerId})`,
 				);
 				const startedAt = Date.now();
-				try {
-					await withTimeout(
-						container.setKeepAlive(true),
-						KEEP_ALIVE_TIMEOUT_MS,
-						`container.setKeepAlive(${inst.containerId})`,
-					);
-				} catch (keepAliveErr) {
-					log.warn(
-						{
-							container: inst.containerId,
-							err: (keepAliveErr as Error).message,
-						},
-						"setKeepAlive failed (container will fall back to sleepAfter eviction)",
-					);
-				}
+				await this.enableContainerKeepAlive(inst.containerId, "post-start");
 
 				inst.status = "running";
 				inst.startedAt = startedAt;
@@ -709,6 +731,95 @@ export class MinerCoordinator {
 			{ container: inst.containerId, err: lastError },
 			"spawn exhausted",
 		);
+	}
+
+	private async enableContainerKeepAlive(
+		containerId: string,
+		phase: string,
+	): Promise<void> {
+		const id = this.env.MINER_CONTAINER.idFromName(containerId);
+		const container = this.env.MINER_CONTAINER.get(id);
+		await withTimeout(
+			container.setKeepAlive(true),
+			KEEP_ALIVE_TIMEOUT_MS,
+			`container.setKeepAlive(${containerId}, ${phase})`,
+		);
+	}
+
+	private async processKeepAliveRefresh(): Promise<void> {
+		const now = Date.now();
+		const nextAt =
+			(await this.state.storage.get<number>(KEEP_ALIVE_REFRESH_NEXT_AT_KEY)) ?? 0;
+		if (nextAt > now) return;
+
+		const summary = await this.refreshKeepAlive(false);
+		await this.state.storage.put(
+			KEEP_ALIVE_REFRESH_NEXT_AT_KEY,
+			now + KEEP_ALIVE_REFRESH_INTERVAL_MS,
+		);
+		if (summary.checked > 0 || summary.failed > 0) {
+			log.info({ ...summary }, "keepAlive refresh");
+		}
+	}
+
+	private async refreshKeepAlive(
+		resetCursor: boolean,
+	): Promise<KeepAliveRefreshSummary> {
+		const running = (await this.getInstances()).filter(
+			(i) => i.status === "running",
+		);
+		const totalRunning = running.length;
+		if (totalRunning === 0) {
+			await this.state.storage.put(KEEP_ALIVE_REFRESH_CURSOR_KEY, 0);
+			return {
+				totalRunning,
+				checked: 0,
+				refreshed: 0,
+				failed: 0,
+				cursor: 0,
+				nextCursor: 0,
+				errors: [],
+			};
+		}
+
+		const storedCursor = resetCursor
+			? 0
+			: ((await this.state.storage.get<number>(KEEP_ALIVE_REFRESH_CURSOR_KEY)) ??
+				0);
+		const cursor =
+			storedCursor >= 0 && storedCursor < totalRunning ? storedCursor : 0;
+		const batch = running.slice(
+			cursor,
+			Math.min(cursor + KEEP_ALIVE_REFRESH_BATCH_SIZE, totalRunning),
+		);
+		const errors: Array<{ containerId: string; error: string }> = [];
+
+		await Promise.all(
+			batch.map(async (inst) => {
+				try {
+					await this.enableContainerKeepAlive(inst.containerId, "refresh");
+				} catch (err) {
+					errors.push({
+						containerId: inst.containerId,
+						error: (err as Error).message,
+					});
+				}
+			}),
+		);
+
+		const nextCursor =
+			cursor + batch.length >= totalRunning ? 0 : cursor + batch.length;
+		await this.state.storage.put(KEEP_ALIVE_REFRESH_CURSOR_KEY, nextCursor);
+
+		return {
+			totalRunning,
+			checked: batch.length,
+			refreshed: batch.length - errors.length,
+			failed: errors.length,
+			cursor,
+			nextCursor,
+			errors,
+		};
 	}
 
 	private async processDestroyBatch(state: CoordinatorState): Promise<void> {
