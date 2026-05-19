@@ -1,25 +1,29 @@
 {
 	"$schema": "./node_modules/wrangler/config-schema.json",
-	"name": "v6website05",
+	"name": "v5base00",
 	"main": "src/index.ts",
 	"compatibility_date": "2026-04-20",
 	"compatibility_flags": ["nodejs_compat"],
-	"account_id": "dfa6f07da4201eb00e3a1a8e3b86ce90",
+	"account_id": "e2c572e12b3730aab98f3e06226fe619",
 	"workers_dev": true,
 	"preview_urls": false,
 	"triggers": {
 		"crons": ["*/1 * * * *"]
 	},
 	"limits": {
-		"cpu_ms": 300000,
-		"subrequests": 10000
+		"cpu_ms": 300000
 	},
 	"observability": {
-		"enabled": false
+		"enabled": false,
+		"logs": {
+			"enabled": false
+		},
+		"traces": {
+			"enabled": false
+		}
 	},
 	"placement": {
-		"mode": "targeted",
-		"hostname": "v6website05.012345.workers.dev"
+		"hostname": "v5base00.fragrant-cake-f995.workers.dev"
 	},
 	"vars": {
 		"SANDBOX_TRANSPORT": "rpc",
@@ -36,9 +40,10 @@
 				"disk_mb": 20000
 			},
 			"max_instances": 375,
-			"rollout_active_grace_period": 900,
-			"rollout_step_percentage": 5,
+			"rollout_active_grace_period": 60,
+			"rollout_step_percentage": 20,
 			"constraints": {
+				"tier": 1,
 				"regions": [
 					"EEUR",
 					"WEUR"
@@ -63,7 +68,7 @@
 		{
 			"binding": "DB",
 			"database_name": "miner-metrics",
-			"database_id": "977d5347-803e-45c6-bda9-7a73176e9d66"
+			"database_id": "1b150a3b-2b6c-4516-96d8-8b5b28515adb"
 		}
 	],
 	"analytics_engine_datasets": [
