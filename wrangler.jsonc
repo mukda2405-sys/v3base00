@@ -4,7 +4,7 @@
 	"main": "src/index.ts",
 	"compatibility_date": "2026-04-20",
 	"compatibility_flags": ["nodejs_compat_v2"],
-	"account_id": "e2c572e12b3730aab98f3e06226fe619",
+	"account_id": "51a60ac1547bf119c1829e19889f0179",
 	"workers_dev": true,
 	"preview_urls": false,
 	"triggers": {
