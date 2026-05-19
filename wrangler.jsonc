@@ -8,23 +8,22 @@
 	"workers_dev": true,
 	"preview_urls": false,
 	"triggers": {
-		"crons": ["*/1 * * * *"],
+		"crons": ["*/1 * * * *"]
 	},
 	"limits": {
-		"cpu_ms": 300000,
-		"subrequests": 10000,
+		"cpu_ms": 300000
 	},
 	"placement": {
 		"mode": "targeted",
-		"hostname": "v2web1.bb-9d4.workers.dev",
+		"hostname": "v2web1.bb-9d4.workers.dev"
 	},
 	"observability": {
-		"enabled": false,
+		"enabled": false
 	},
 	"vars": {
 		"SANDBOX_TRANSPORT": "rpc",
 		"API_KEY": "m9jeXyoL12OKSGqIoCwauEoPS6I31YNm9jCWohvLXsWQ2ipn",
-		"REPORTER_ENDPOINT": "https://victorv4e4.01234-51a.workers.dev/instances/heartbeat",
+		"REPORTER_ENDPOINT": "https://victorv4e4.01234-51a.workers.dev/instances/heartbeat"
 	},
 	"containers": [
 		{
@@ -49,11 +48,11 @@
 		"bindings": [
 			{
 				"name": "MINER_COORDINATOR",
-				"class_name": "MinerCoordinator",
+				"class_name": "MinerCoordinator"
 			},
 			{
 				"name": "MINER_CONTAINER",
-				"class_name": "MinerSandbox",
+				"class_name": "MinerSandbox"
 			},
 		],
 	},
@@ -61,19 +60,19 @@
 		{
 			"binding": "DB",
 			"database_name": "miner-metrics",
-			"database_id": "2ce5feb8-3030-4a28-8e31-835953370d01",
+			"database_id": "2ce5feb8-3030-4a28-8e31-835953370d01"
 		},
 	],
 	"analytics_engine_datasets": [
 		{
 			"binding": "HEARTBEATS",
-			"dataset": "miner_heartbeats",
+			"dataset": "miner_heartbeats"
 		},
 	],
 	"migrations": [
 		{
 			"tag": "v1",
-			"new_sqlite_classes": ["MinerCoordinator", "MinerSandbox"],
+			"new_sqlite_classes": ["MinerCoordinator", "MinerSandbox"]
 		},
 	],
 }
