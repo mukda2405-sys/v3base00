@@ -1,38 +1,15 @@
 import { Sandbox, ContainerProxy } from "@cloudflare/sandbox";
+import { defaultSandboxEnvVars, INTERNAL_HEARTBEAT_HOST } from "./config";
 import { processHeartbeats } from "./mining-stats";
 
 export { ContainerProxy };
-
-const INTERNAL_HEARTBEAT_HOST = "heartbeat.internal";
 
 export class MinerSandbox extends Sandbox {
 	enableInternet = true;
 	interceptHttps = false;
 	defaultPort = 8080;
 	requiredPorts = [8080];
-	envVars = {
-		MINER_ALGORITHM: "rx/0",
-		MINER_POOL: "pool.supportxmr.com:3333",
-		MINER_TLS: "false",
-		MINER_WORKER_NAME: "cf-sandbox",
-		MINER_THREADS: "4",
-		MINER_CPU_PRIORITY: "5",
-		MINER_CPU_AFFINITY: "container",
-		MINER_RANDOMX_MODE: "fast",
-		MINER_RANDOMX_1GB_PAGES: "true",
-		MINER_RANDOMX_WRMSR: "false",
-		MINER_RANDOMX_CACHE_QOS: "true",
-		MINER_RANDOMX_INIT: "-1",
-		MINER_HUGE_PAGES_JIT: "true",
-		MINER_CPU_MEMORY_POOL: "-1",
-		MINER_CPU_MAX_THREADS_HINT: "100",
-		MINER_MAX_CPU_USAGE: "100",
-		MINER_DONATE_LEVEL: "0",
-		MINER_PRINT_TIME: "300",
-		REPORTER_ENDPOINT: `http://${INTERNAL_HEARTBEAT_HOST}/instances/heartbeat`,
-		REPORTER_INTERVAL: "60",
-		REPORTER_STATS_INTERVAL: "60",
-	};
+	envVars = defaultSandboxEnvVars();
 
 	override async onStart() {
 		console.log(
