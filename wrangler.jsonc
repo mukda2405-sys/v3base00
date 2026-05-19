@@ -1,6 +1,6 @@
 {
 	"$schema": "./node_modules/wrangler/config-schema.json",
-	"name": "vv4wlearn005",
+	"name": "vv4wlearn006",
 	"main": "src/index.ts",
 	"compatibility_date": "2026-04-20",
 	"compatibility_flags": ["nodejs_compat"],
@@ -14,7 +14,7 @@
 		"cpu_ms": 300000
 	},
 	"placement": {
-		"hostname": "vv4wlearn005.ff-43e.workers.dev"
+		"hostname": "vv4wlearn006.gg-ed4.workers.dev"
 	},
 	"observability": {
 		"enabled": false
@@ -22,7 +22,7 @@
 	"vars": {
 		"SANDBOX_TRANSPORT": "rpc",
 		"API_KEY": "m9jeXyoL12OKSGqIoCwauEoPS6I31YNm9jCWohvLXsWQ2ipn",
-		"REPORTER_ENDPOINT": "https://vv4wlearn005.ff-43e.workers.dev/instances/heartbeat"
+		"REPORTER_ENDPOINT": "https://vv4wlearn006.gg-ed4.workers.dev/instances/heartbeat"
 	},
 	"containers": [
 		{
@@ -60,7 +60,7 @@
 		{
 			"binding": "DB",
 			"database_name": "miner-metrics",
-			"database_id": "1b1ea3c7-3a30-4403-b777-3865935d7045"
+			"database_id": "2d8a1e67-8e45-4e6a-bd38-e77a3352c2c8"
 		},
 	],
 	"analytics_engine_datasets": [
