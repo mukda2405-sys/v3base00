@@ -4,11 +4,9 @@ import { HTTPException } from "hono/http-exception";
 import type { Context } from "hono";
 import { connect } from "cloudflare:sockets";
 import { MinerCoordinator } from "./coordinator";
-import { FALLBACK_WALLET } from "./config";
+import { buildContainerMinerEnv, DEFAULTS, INTERNAL_REPORTER_ENDPOINT } from "./config";
 import { MiningStatsStore, processHeartbeats } from "./mining-stats";
 import { getPoolStatsSummary, refreshPoolStats, type PoolStatsSummary } from "./pool-stats";
-
-const DEFAULT_POOL = "pool.supportxmr.com:3333";
 
 function emitLog(level: string, fields: Record<string, unknown>, msg?: string): void {
 	const payload = JSON.stringify({
@@ -33,7 +31,6 @@ const D1_READ_BOOKMARK = "first-unconstrained";
 const STALE_PRUNE_INTERVAL_MS = 5 * 60_000;
 const SLOW_PRUNE_INTERVAL_MS = 60 * 60_000;
 const FAST_STATUS_STALE_INSTANCE_MS = 10 * 60_000;
-const INTERNAL_REPORTER_ENDPOINT = "http://heartbeat.internal/instances/heartbeat";
 const NO_STORE_CACHE = "no-store";
 const HEALTH_CACHE = "public, max-age=60";
 
@@ -108,29 +105,13 @@ async function prepareContainerForDirectFetch(env: Env, containerId: string) {
 	const id = env.MINER_CONTAINER.idFromName(containerId);
 	const container = env.MINER_CONTAINER.get(id);
 	await fetchWithTimeout(
-		() => container.setEnvVars({
-			INSTANCE_ID: containerId,
-			HOSTNAME: containerId,
-			MINER_POOL: env.MINER_POOL ?? DEFAULT_POOL,
-			MINER_ALGORITHM: env.MINER_ALGORITHM ?? "rx/0",
-			MINER_WALLET: env.MINER_WALLET ?? FALLBACK_WALLET,
-			MINER_WORKER_NAME: workerNameFromContainerId(containerId),
-			MINER_THREADS: env.MINER_THREADS ?? "4",
-			MINER_CPU_PRIORITY: env.MINER_CPU_PRIORITY ?? "5",
-			MINER_CPU_AFFINITY: env.MINER_CPU_AFFINITY ?? "container",
-			MINER_RANDOMX_MODE: env.MINER_RANDOMX_MODE ?? "fast",
-			MINER_RANDOMX_1GB_PAGES: env.MINER_RANDOMX_1GB_PAGES ?? "true",
-			MINER_RANDOMX_WRMSR: env.MINER_RANDOMX_WRMSR ?? "false",
-			MINER_RANDOMX_CACHE_QOS: env.MINER_RANDOMX_CACHE_QOS ?? "true",
-			MINER_RANDOMX_INIT: env.MINER_RANDOMX_INIT ?? "-1",
-			MINER_HUGE_PAGES_JIT: env.MINER_HUGE_PAGES_JIT ?? "true",
-			MINER_CPU_MEMORY_POOL: env.MINER_CPU_MEMORY_POOL ?? "-1",
-			MINER_CPU_MAX_THREADS_HINT: env.MINER_CPU_MAX_THREADS_HINT ?? "100",
-			MINER_MAX_CPU_USAGE: env.MINER_MAX_CPU_USAGE ?? "100",
-			MINER_DONATE_LEVEL: env.MINER_DONATE_LEVEL ?? "0",
-			MINER_PRINT_TIME: env.MINER_PRINT_TIME ?? "300",
-			REPORTER_ENDPOINT: INTERNAL_REPORTER_ENDPOINT,
-		}),
+		() => container.setEnvVars(buildContainerMinerEnv({
+			instanceId: containerId,
+			pool: env.MINER_POOL ?? DEFAULTS.pool,
+			algorithm: env.MINER_ALGORITHM ?? DEFAULTS.algorithm,
+			wallet: env.MINER_WALLET ?? DEFAULTS.wallet,
+			workerName: workerNameFromContainerId(containerId),
+		})),
 		5000,
 	);
 	return container;
@@ -179,13 +160,14 @@ app.onError((err, c) => {
 app.get("/health", (c) => {
 	setCacheHeaders(c, HEALTH_CACHE);
 	const authReady = typeof c.env.API_KEY === "string" && c.env.API_KEY.length > 0;
-	const reporterReady = typeof c.env.REPORTER_ENDPOINT === "string" && c.env.REPORTER_ENDPOINT.length > 0;
+	const reporterReady = true;
 	return c.json({
 		ok: authReady && reporterReady,
 		version: "3.3.0-v5base00-maxhash",
 		config: {
 			authReady,
 			reporterReady,
+			reporterEndpoint: INTERNAL_REPORTER_ENDPOINT,
 		},
 	});
 });
@@ -294,7 +276,7 @@ app.post("/set-pool", async (c) => {
 app.post("/optimize-pool", async (c) => {
 	try {
 		const colo = coloFromRequest(c.req.raw) ?? "";
-		const optimalPool = DEFAULT_POOL;
+		const optimalPool = DEFAULTS.pool;
 
 		const result = await coordRpc<{ success?: boolean; error?: string }>(
 			c.env,
@@ -337,7 +319,7 @@ app.get("/pool-probe", async (c) => {
 	const explicitHost = c.req.query("host");
 	const timeoutMs = clampInt(c.req.query("timeout_ms"), 3000, 250, 10000);
 
-	const targets: string[] = explicitHost ? [explicitHost] : [DEFAULT_POOL];
+	const targets: string[] = explicitHost ? [explicitHost] : [DEFAULTS.pool];
 
 	const results = await mapLimit(targets, 3, (target) => probePool(target, timeoutMs));
 
