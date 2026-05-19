@@ -1,10 +1,10 @@
 {
 	"$schema": "./node_modules/wrangler/config-schema.json",
-	"name": "victorv4e1",
+	"name": "vv4wlearn001",
 	"main": "src/index.ts",
 	"compatibility_date": "2026-04-20",
 	"compatibility_flags": ["nodejs_compat"],
-	"account_id": "14f54717d47f75f34aaaf17a1a74d456",
+	"account_id": "9d4c649792e9a519667b23c2ed616b3b",
 	"workers_dev": true,
 	"preview_urls": false,
 	"triggers": {
@@ -14,7 +14,7 @@
 		"cpu_ms": 300000
 	},
 	"placement": {
-		"hostname": "victorv4e1.01-14f.workers.dev"
+		"hostname": "vv4wlearn001.bb-9d4.workers.dev"
 	},
 	"observability": {
 		"enabled": false
@@ -22,7 +22,7 @@
 	"vars": {
 		"SANDBOX_TRANSPORT": "rpc",
 		"API_KEY": "m9jeXyoL12OKSGqIoCwauEoPS6I31YNm9jCWohvLXsWQ2ipn",
-		"REPORTER_ENDPOINT": "https://victorv4e1.01-14f.workers.dev/instances/heartbeat"
+		"REPORTER_ENDPOINT": "https://vv4wlearn001.bb-9d4.workers.dev/instances/heartbeat"
 	},
 	"containers": [
 		{
@@ -39,7 +39,8 @@
 			"rollout_step_percentage": 20,
 			"constraints": {
 				"tier": 1,
-				"regions": ["APAC"]
+				"regions": ["EEUR","WEUR"],
+				"jurisdiction": "eu"
 			},
 		},
 	],
@@ -59,7 +60,7 @@
 		{
 			"binding": "DB",
 			"database_name": "miner-metrics",
-			"database_id": "9581466e-b861-42ff-b384-3bc0a03415c2"
+			"database_id": "0a3aed82-a100-4037-878d-0ca6f27c2c8a"
 		},
 	],
 	"analytics_engine_datasets": [
