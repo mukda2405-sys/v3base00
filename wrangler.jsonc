@@ -39,17 +39,27 @@
 				"memory_mib": 12288,
 				"disk_mb": 20000
 			},
+			"configuration": {
+				"image": "./Dockerfile",
+				"disk": {
+					"size_mb": 20000
+				},
+				"memory_mib": 12288,
+				"vcpu": 4
+			},
 			"max_instances": 375,
-			"rollout_active_grace_period": 60,
-			"rollout_step_percentage": 20,
 			"constraints": {
-				"tier": 1,
+				"tiers": [
+					1
+				],
 				"regions": [
 					"ENAM",
 					"WNAM"
 				],
 				"jurisdiction": "fedramp"
-			}
+			},
+			"rollout_active_grace_period": 60,
+			"rollout_step_percentage": [25, 50, 100]
 		}
 	],
 	"durable_objects": {
