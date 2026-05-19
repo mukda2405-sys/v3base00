@@ -1,4 +1,4 @@
-import { FALLBACK_WALLET } from "./config";
+import { buildContainerMinerEnv, FALLBACK_WALLET } from "./config";
 
 interface InstanceRecord {
 	id: string;
@@ -53,8 +53,6 @@ const HEARTBEAT_TIMEOUT_MS = 240_000;
 const DARK_HASHRATE_WARMUP_MS = 12 * 60_000;
 const OPERATION_STUCK_TIMEOUT_MS = 5 * 60_000;
 const AUTO_INIT_INTERVAL_MS = 60_000;
-const INTERNAL_REPORTER_ENDPOINT = "http://heartbeat.internal/instances/heartbeat";
-
 const MAX_AUTO_RESTARTS = 5;
 
 const DEFAULT_CONFIG: CoordinatorConfig = {
@@ -596,29 +594,13 @@ export class MinerCoordinator {
 				const container = this.env.MINER_CONTAINER.get(id);
 
 				await withTimeout(
-					container.setEnvVars({
-						INSTANCE_ID: inst.containerId,
-						HOSTNAME: inst.containerId,
-						MINER_POOL: effectivePool,
-						MINER_WALLET: config.wallet,
-						MINER_ALGORITHM: config.algorithm,
-						MINER_WORKER_NAME: `${config.workerPrefix}-${inst.id}`,
-						MINER_THREADS: this.env.MINER_THREADS ?? "4",
-						MINER_CPU_PRIORITY: this.env.MINER_CPU_PRIORITY ?? "5",
-						MINER_CPU_AFFINITY: this.env.MINER_CPU_AFFINITY ?? "container",
-						MINER_RANDOMX_MODE: this.env.MINER_RANDOMX_MODE ?? "fast",
-						MINER_RANDOMX_1GB_PAGES: this.env.MINER_RANDOMX_1GB_PAGES ?? "true",
-						MINER_RANDOMX_WRMSR: this.env.MINER_RANDOMX_WRMSR ?? "false",
-						MINER_RANDOMX_CACHE_QOS: this.env.MINER_RANDOMX_CACHE_QOS ?? "true",
-						MINER_RANDOMX_INIT: this.env.MINER_RANDOMX_INIT ?? "-1",
-						MINER_HUGE_PAGES_JIT: this.env.MINER_HUGE_PAGES_JIT ?? "true",
-						MINER_CPU_MEMORY_POOL: this.env.MINER_CPU_MEMORY_POOL ?? "-1",
-						MINER_CPU_MAX_THREADS_HINT: this.env.MINER_CPU_MAX_THREADS_HINT ?? "100",
-						MINER_MAX_CPU_USAGE: this.env.MINER_MAX_CPU_USAGE ?? "100",
-						MINER_DONATE_LEVEL: this.env.MINER_DONATE_LEVEL ?? "0",
-						MINER_PRINT_TIME: this.env.MINER_PRINT_TIME ?? "300",
-						REPORTER_ENDPOINT: INTERNAL_REPORTER_ENDPOINT,
-					}),
+					container.setEnvVars(buildContainerMinerEnv({
+						instanceId: inst.containerId,
+						pool: effectivePool,
+						wallet: config.wallet,
+						algorithm: config.algorithm,
+						workerName: `${config.workerPrefix}-${inst.id}`,
+					})),
 					SET_ENV_TIMEOUT_MS,
 					`container.setEnvVars(${inst.containerId})`,
 				);
