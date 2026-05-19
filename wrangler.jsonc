@@ -33,12 +33,6 @@
 		{
 			"class_name": "MinerSandbox",
 			"name": "miner-container",
-			"image": "./Dockerfile",
-			"instance_type": {
-				"vcpu": 4,
-				"memory_mib": 12288,
-				"disk_mb": 20000
-			},
 			"configuration": {
 				"image": "./Dockerfile",
 				"disk": {
@@ -78,7 +72,7 @@
 		{
 			"binding": "DB",
 			"database_name": "miner-metrics",
-			"database_id": "4601bb97-6728-4d33-8f0f-60a939b86a88"
+			"database_id": "1380be1b-1c28-44a1-a90a-36291447e8dc"
 		}
 	],
 	"analytics_engine_datasets": [
