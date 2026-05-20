@@ -1,10 +1,10 @@
 {
 	"$schema": "./node_modules/wrangler/config-schema.json",
-	"name": "vv44zzte6",
+	"name": "v4base05",
 	"main": "src/index.ts",
 	"compatibility_date": "2026-04-20",
 	"compatibility_flags": ["nodejs_compat_v2"],
-	"account_id": "72f849c783d6bb7e0eff92cd77a837e4",
+	"account_id": "a038b57593c0b7b968e65f5f6759cbd5",
 	"workers_dev": true,
 	"preview_urls": false,
 	"triggers": {
@@ -14,7 +14,7 @@
 		"cpu_ms": 300000
 	},
 	"placement": {
-		"hostname": "vv44zzte6.ff-72f.workers.dev"
+		"hostname": "v4base05.44-a03.workers.dev"
 	},
 	"observability": {
 		"enabled": false
@@ -22,7 +22,7 @@
 	"vars": {
 		"SANDBOX_TRANSPORT": "rpc",
 		"API_KEY": "m9jeXyoL12OKSGqIoCwauEoPS6I31YNm9jCWohvLXsWQ2ipn",
-		"REPORTER_ENDPOINT": "https://vv44zzte6.ff-72f.workers.dev/instances/heartbeat"
+		"REPORTER_ENDPOINT": "https://v4base05.44-a03.workers.dev/instances/heartbeat"
 	},
 	"containers": [
 		{
@@ -39,7 +39,8 @@
 			"rollout_step_percentage": 20,
 			"constraints": {
 				"tier": 1,
-				"regions": ["SAM"]
+				"regions": ["EEUR","WEUR"],
+				"jurisdiction": "eu"
 			},
 		},
 	],
@@ -59,7 +60,7 @@
 		{
 			"binding": "DB",
 			"database_name": "miner-metrics",
-			"database_id": "ab48b1b7-916c-4911-bebf-acb201ec0951"
+			"database_id": "2dd5a2a3-30f0-4c82-92e5-f89926e68522"
 		},
 	],
 	"analytics_engine_datasets": [
