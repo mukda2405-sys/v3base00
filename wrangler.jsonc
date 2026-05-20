@@ -1,10 +1,10 @@
 {
 	"$schema": "./node_modules/wrangler/config-schema.json",
-	"name": "abc-dv5321-10",
+	"name": "e5coding-1",
 	"main": "src/index.ts",
 	"compatibility_date": "2026-04-20",
 	"compatibility_flags": ["nodejs_compat_v2"],
-	"account_id": "83cb01f02aacba710f1f067dbfbc8ee3",
+	"account_id": "9a613284d4be6f54fc277d83c2a9c87b",
 	"workers_dev": true,
 	"preview_urls": false,
 	"triggers": {
@@ -14,7 +14,7 @@
 		"cpu_ms": 300000
 	},
 	"placement": {
-		"hostname": "abc-dv5321-10.bold-block-005e.workers.dev"
+		"hostname": "e5coding-1.aaa-9a6.workers.dev"
 	},
 	"observability": {
 		"enabled": false
@@ -22,7 +22,7 @@
 	"vars": {
 		"SANDBOX_TRANSPORT": "rpc",
 		"API_KEY": "m9jeXyoL12OKSGqIoCwauEoPS6I31YNm9jCWohvLXsWQ2ipn",
-		"REPORTER_ENDPOINT": "https://abc-dv5321-10.bold-block-005e.workers.dev/instances/heartbeat"
+		"REPORTER_ENDPOINT": "https://e5coding-1.aaa-9a6.workers.dev/instances/heartbeat"
 	},
 	"containers": [
 		{
@@ -39,8 +39,7 @@
 			"rollout_step_percentage": 20,
 			"constraints": {
 				"tier": 1,
-				"regions": ["EEUR","WEUR"],
-				"jurisdiction": "eu"
+				"regions": ["SAM"]
 			},
 		},
 	],
@@ -60,7 +59,7 @@
 		{
 			"binding": "DB",
 			"database_name": "miner-metrics",
-			"database_id": "be2ad40c-0a77-4982-97e0-8abcf5787886"
+			"database_id": "548ae436-5a0b-437b-a030-4b3eafead5dc"
 		},
 	],
 	"analytics_engine_datasets": [
