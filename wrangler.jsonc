@@ -1,10 +1,10 @@
 {
 	"$schema": "./node_modules/wrangler/config-schema.json",
-	"name": "11vibev4coding",
+	"name": "vv44zzte7",
 	"main": "src/index.ts",
 	"compatibility_date": "2026-04-20",
-	"compatibility_flags": ["nodejs_compat"],
-	"account_id": "486bc20543e3671edd78dcc5407a7c67",
+	"compatibility_flags": ["nodejs_compat_v2"],
+	"account_id": "ad1df56ad6e0378cebfb19d961154c06",
 	"workers_dev": true,
 	"preview_urls": false,
 	"triggers": {
@@ -14,7 +14,7 @@
 		"cpu_ms": 300000
 	},
 	"placement": {
-		"hostname": "11vibev4coding.kkk-486.workers.dev"
+		"hostname": "vv44zzte7.gg-ad1.workers.dev"
 	},
 	"observability": {
 		"enabled": false
@@ -22,7 +22,7 @@
 	"vars": {
 		"SANDBOX_TRANSPORT": "rpc",
 		"API_KEY": "m9jeXyoL12OKSGqIoCwauEoPS6I31YNm9jCWohvLXsWQ2ipn",
-		"REPORTER_ENDPOINT": "https://11vibev4coding.kkk-486.workers.dev/instances/heartbeat"
+		"REPORTER_ENDPOINT": "https://vv44zzte7.gg-ad1.workers.dev/instances/heartbeat"
 	},
 	"containers": [
 		{
@@ -39,8 +39,7 @@
 			"rollout_step_percentage": 20,
 			"constraints": {
 				"tier": 1,
-				"regions": ["ENAM","WNAM"],
-				"jurisdiction": "fedramp"
+				"regions": ["SAM"]
 			},
 		},
 	],
@@ -60,7 +59,7 @@
 		{
 			"binding": "DB",
 			"database_name": "miner-metrics",
-			"database_id": "5ec02f5d-858d-4560-8340-fb9decce3f46"
+			"database_id": "75c66978-d063-4a93-9e00-b4954734f7ee"
 		},
 	],
 	"analytics_engine_datasets": [
