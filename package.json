@@ -7,17 +7,20 @@
 		"@cloudflare/sandbox": "0.9.3",
 		"@cloudflare/workers-types": "^4.20260511.1",
 		"@types/node": "24.10.1",
+		"eslint": "10.4.0",
 		"typescript": "5.9.3",
-		"wrangler": "4.56.0"
+		"typescript-eslint": "8.59.4",
+		"wrangler": "4.93.0"
 	},
 	"private": true,
 	"scripts": {
 		"dev": "wrangler dev",
 		"start": "wrangler dev",
-		"deploy": "rm -rf .wrangler && wrangler deploy",
+		"clean:wrangler": "node -e \"require('node:fs').rmSync('.wrangler',{recursive:true,force:true})\"",
+		"deploy": "npm run clean:wrangler && wrangler deploy",
 		"cf-typegen": "wrangler types",
 		"typecheck": "tsc --noEmit",
-		"lint": "eslint src/**/*.ts"
+		"lint": "eslint src/**/*.ts reporter/**/*.js eslint.config.js"
 	},
 	"type": "module"
 }
