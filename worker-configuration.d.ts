@@ -24,7 +24,6 @@ declare global {
 		MINER_WORKER_NAME?: string;
 		MINER_TLS?: string;
 
-		TARGET_INSTANCES?: string;
 		HEARTBEAT_TIMEOUT_MS?: string;
 		RECONCILE_INTERVAL_MS?: string;
 		CRON_INTERVAL_MS?: string;
