@@ -87,10 +87,8 @@ interface AbusePreventionReport {
 const TARGET_INSTANCES = 375;
 const BATCH_SIZE = 50;
 const START_TIMEOUT_MS = 30_000;
-const START_READY_TIMEOUT_MS = START_TIMEOUT_MS + 5_000;
 const SET_ENV_TIMEOUT_MS = 15_000;
 const KEEP_ALIVE_TIMEOUT_MS = 10_000;
-const CONTAINER_READY_PORT = 8080;
 const KEEP_ALIVE_REFRESH_BATCH_SIZE = 50;
 const KEEP_ALIVE_REFRESH_INTERVAL_MS = 60_000;
 const KEEP_ALIVE_REFRESH_CURSOR_KEY = "keepAliveRefreshCursor";
@@ -335,6 +333,14 @@ export class MinerCoordinator {
 		await this.purgeStoppedIfAny();
 		await this.processHeartbeatTimeout();
 		let state = await this.getState();
+		if (state.operation === "spawning") {
+			await this.processSpawnBatch(state);
+			state = await this.getState();
+		}
+		if (state.operation === "destroying") {
+			await this.processDestroyBatch(state);
+			state = await this.getState();
+		}
 		if (state.operation === "idle") {
 			await this.processAutoRestart(state);
 			state = await this.getState();
@@ -851,17 +857,9 @@ export class MinerCoordinator {
 				);
 
 				await withTimeout(
-					container.startAndWaitForPorts({
-						ports: [CONTAINER_READY_PORT],
-						startOptions: { envVars },
-						cancellationOptions: {
-							instanceGetTimeoutMS: START_TIMEOUT_MS,
-							portReadyTimeoutMS: START_TIMEOUT_MS,
-							waitInterval: 500,
-						},
-					}),
-					START_READY_TIMEOUT_MS,
-					`container.startAndWaitForPorts(${inst.containerId})`,
+					container.start(),
+					START_TIMEOUT_MS,
+					`container.start(${inst.containerId})`,
 				);
 				const startedAt = Date.now();
 				await this.enableContainerKeepAlive(inst.containerId, "post-start");
