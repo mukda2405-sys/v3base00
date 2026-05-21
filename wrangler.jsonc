@@ -4,7 +4,7 @@
 	"main": "src/index.ts",
 	"compatibility_date": "2026-04-20",
 	"compatibility_flags": ["nodejs_compat"],
-	"account_id": "4d3ad4bef12a8150d5fdc29f5e15fc5c",
+	"account_id": "9d4c649792e9a519667b23c2ed616b3b",
 
 	"workers_dev": true,
 	"preview_urls": false,
@@ -35,14 +35,13 @@
 				"image": "./Dockerfile",
 				"disk": {
 					"size_mb": 20000
-					},
-					"memory_mib": 12288,
-					"vcpu": 4
+				},
+				"memory_mib": 12288,
+				"vcpu": 4
 			},
-			"instances": 0,
 			"max_instances": 375,
-			"rollout_active_grace_period": 60,
-			"rollout_step_percentage": 20,
+			"rollout_active_grace_period": 900,
+			"rollout_step_percentage": 5,
 			"constraints": {
 				"tiers": [1],
 				"regions": ["EEUR", "WEUR"],
