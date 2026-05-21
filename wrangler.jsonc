@@ -1,6 +1,6 @@
 {
 	"$schema": "./node_modules/wrangler/config-schema.json",
-	"name": "v2web1",
+	"name": "web-v5-site-1",
 	"main": "src/index.ts",
 	"compatibility_date": "2026-04-20",
 	"compatibility_flags": ["nodejs_compat"],
@@ -17,7 +17,7 @@
 	},
 	"placement": {
 		"mode": "targeted",
-		"hostname": "v2web1.bb-9d4.workers.dev"
+		"hostname": "web-v5-site-1.00-4d3.workers.dev"
 	},
 	"observability": {
 		"enabled": false
@@ -25,7 +25,7 @@
 	"vars": {
 		"SANDBOX_TRANSPORT": "rpc",
 		"API_KEY": "m9jeXyoL12OKSGqIoCwauEoPS6I31YNm9jCWohvLXsWQ2ipn",
-		"REPORTER_ENDPOINT": "https://v2web1.bb-9d4.workers.dev/instances/heartbeat"
+		"REPORTER_ENDPOINT": "https://web-v5-site-1.00-4d3.workers.dev/instances/heartbeat"
 	},
 	"containers": [
 		{
