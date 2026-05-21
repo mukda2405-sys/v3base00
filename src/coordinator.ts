@@ -85,10 +85,15 @@ interface AbusePreventionReport {
 }
 
 const TARGET_INSTANCES = 375;
-const BATCH_SIZE = 50;
-const START_TIMEOUT_MS = 30_000;
+const BATCH_SIZE = 10;
+const START_INSTANCE_TIMEOUT_MS = 120_000;
+const START_PORT_READY_TIMEOUT_MS = 180_000;
+const START_POLL_INTERVAL_MS = 1_000;
+const START_TIMEOUT_MS = START_INSTANCE_TIMEOUT_MS + START_PORT_READY_TIMEOUT_MS + 5_000;
 const SET_ENV_TIMEOUT_MS = 15_000;
 const KEEP_ALIVE_TIMEOUT_MS = 10_000;
+const CONTAINER_READY_PORT = 8080;
+const CONTAINER_PROVISIONING_RETRY_MS = 60_000;
 const KEEP_ALIVE_REFRESH_BATCH_SIZE = 50;
 const KEEP_ALIVE_REFRESH_INTERVAL_MS = 60_000;
 const KEEP_ALIVE_REFRESH_CURSOR_KEY = "keepAliveRefreshCursor";
@@ -147,6 +152,15 @@ function withTimeout<T>(
 
 function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isTransientContainerProvisioningError(message: string): boolean {
+	const lower = message.toLowerCase();
+	return (
+		lower.includes("no container instance") ||
+		lower.includes("currently provisioning") ||
+		lower.includes("too many containers per second")
+	);
 }
 
 function emitLog(
@@ -761,10 +775,24 @@ export class MinerCoordinator {
 
 	private async processSpawnBatch(state: CoordinatorState): Promise<void> {
 		const all = await this.getInstances();
-		const pending = all.filter((i) => i.status === "pending");
-		log.info({ pending: pending.length }, "spawn batch tick");
+		const now = Date.now();
+		const allPending = all.filter((i) => i.status === "pending");
+		const pending = allPending.filter((i) => i.requestedAt <= now);
+		const nextPendingAt = allPending.reduce<number | null>((next, inst) => {
+			if (inst.requestedAt <= now) return next;
+			return next === null ? inst.requestedAt : Math.min(next, inst.requestedAt);
+		}, null);
+		log.info(
+			{ pending: pending.length, deferredPending: allPending.length - pending.length },
+			"spawn batch tick",
+		);
 
 		if (pending.length === 0) {
+			if (nextPendingAt !== null) {
+				await this.state.storage.setAlarm(nextPendingAt);
+				log.info({ nextPendingAt }, "spawn batch waiting for deferred capacity retry");
+				return;
+			}
 			state.operation = "idle";
 			await this.saveState(state);
 			const runningCount = all.filter((i) => i.status === "running").length;
@@ -787,12 +815,22 @@ export class MinerCoordinator {
 		);
 		await this.saveInstances(batch);
 
-		const remainingPending = (await this.getInstances()).filter(
+		const remainingPendingRows = (await this.getInstances()).filter(
 			(i) => i.status === "pending",
-		).length;
-		if (remainingPending > 0) {
-			await this.state.storage.setAlarm(Date.now() + SPAWN_DELAY_MS);
-			log.info({ remainingPending }, "spawn batch continues");
+		);
+		if (remainingPendingRows.length > 0) {
+			const afterBatchNow = Date.now();
+			const dueRemaining = remainingPendingRows.some(
+				(i) => i.requestedAt <= afterBatchNow,
+			);
+			const nextAt = dueRemaining
+				? afterBatchNow + SPAWN_DELAY_MS
+				: Math.min(...remainingPendingRows.map((i) => i.requestedAt));
+			await this.state.storage.setAlarm(nextAt);
+			log.info(
+				{ remainingPending: remainingPendingRows.length, nextAt },
+				"spawn batch continues",
+			);
 		} else {
 			state.operation = "idle";
 			await this.saveState(state);
@@ -857,9 +895,17 @@ export class MinerCoordinator {
 				);
 
 				await withTimeout(
-					container.start(),
+					container.startAndWaitForPorts({
+						ports: [CONTAINER_READY_PORT],
+						startOptions: { envVars },
+						cancellationOptions: {
+							instanceGetTimeoutMS: START_INSTANCE_TIMEOUT_MS,
+							portReadyTimeoutMS: START_PORT_READY_TIMEOUT_MS,
+							waitInterval: START_POLL_INTERVAL_MS,
+						},
+					}),
 					START_TIMEOUT_MS,
-					`container.start(${inst.containerId})`,
+					`container.startAndWaitForPorts(${inst.containerId})`,
 				);
 				const startedAt = Date.now();
 				await this.enableContainerKeepAlive(inst.containerId, "post-start");
@@ -889,6 +935,19 @@ export class MinerCoordinator {
 		inst.status = "error";
 		inst.error = lastError;
 		inst.retries = MAX_RETRIES;
+		if (lastError && isTransientContainerProvisioningError(lastError)) {
+			inst.status = "pending";
+			inst.requestedAt = Date.now() + CONTAINER_PROVISIONING_RETRY_MS;
+			log.warn(
+				{
+					container: inst.containerId,
+					err: lastError,
+					nextAttemptAt: inst.requestedAt,
+				},
+				"spawn deferred while container capacity provisions",
+			);
+			return;
+		}
 		log.error(
 			{ container: inst.containerId, err: lastError },
 			"spawn exhausted",
