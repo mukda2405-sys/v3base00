@@ -153,10 +153,7 @@ function rowToSnapshot(row: Record<string, unknown>): HeartbeatSnapshot {
 	};
 }
 
-function num(
-	row: Record<string, unknown> | null | undefined,
-	key: string,
-): number {
+function num(row: Record<string, unknown> | null | undefined, key: string): number {
 	if (!row) return 0;
 	const v = Number(row[key] ?? 0);
 	return Number.isFinite(v) ? v : 0;

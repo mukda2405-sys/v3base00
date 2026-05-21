@@ -15,15 +15,7 @@ interface InstanceRecord {
 	autoRestartCount: number;
 }
 
-type InstanceStatus =
-	| "pending"
-	| "starting"
-	| "running"
-	| "stale"
-	| "stopping"
-	| "stopped"
-	| "error"
-	| "quarantined";
+type InstanceStatus = "pending" | "starting" | "running" | "stale" | "stopping" | "stopped" | "error" | "quarantined";
 
 const VALID_STATUSES: ReadonlySet<InstanceStatus> = new Set([
 	"pending",
@@ -84,10 +76,10 @@ interface AbusePreventionReport {
 	generatedAt: number;
 }
 
-const TARGET_INSTANCES = 375;
+const TARGET_INSTANCES = 340;
 const BATCH_SIZE = 10;
-const START_INSTANCE_TIMEOUT_MS = 120_000;
-const START_PORT_READY_TIMEOUT_MS = 180_000;
+const START_INSTANCE_TIMEOUT_MS = 30_000;
+const START_PORT_READY_TIMEOUT_MS = 90_000;
 const START_POLL_INTERVAL_MS = 1_000;
 const START_TIMEOUT_MS = START_INSTANCE_TIMEOUT_MS + START_PORT_READY_TIMEOUT_MS + 5_000;
 const SET_ENV_TIMEOUT_MS = 15_000;
@@ -127,18 +119,11 @@ function isValidPool(pool: string): boolean {
 	return Number.isFinite(port) && port >= 1 && port <= 65535;
 }
 
-function getOptimalPool(
-	_colo: string | null | undefined,
-	fallbackPool: string,
-): string {
+function getOptimalPool(_colo: string | null | undefined, fallbackPool: string): string {
 	return fallbackPool;
 }
 
-function withTimeout<T>(
-	promise: Promise<T>,
-	ms: number,
-	context: string,
-): Promise<T> {
+function withTimeout<T>(promise: Promise<T>, ms: number, context: string): Promise<T> {
 	return Promise.race([
 		promise,
 		new Promise<never>((_, reject) =>
@@ -163,11 +148,7 @@ function isTransientContainerProvisioningError(message: string): boolean {
 	);
 }
 
-function emitLog(
-	level: string,
-	fields: Record<string, unknown>,
-	msg?: string,
-): void {
+function emitLog(level: string, fields: Record<string, unknown>, msg?: string): void {
 	const payload = JSON.stringify({
 		level,
 		time: new Date().toISOString(),

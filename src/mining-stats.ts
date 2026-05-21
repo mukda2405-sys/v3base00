@@ -568,11 +568,7 @@ function toNullablePercent(value: unknown): number | null {
 	return Math.min(100, Math.max(0, n));
 }
 
-function cleanText(
-	value: unknown,
-	fallback: string,
-	maxLength: number,
-): string {
+function cleanText(value: unknown, fallback: string, maxLength: number): string {
 	if (typeof value !== "string" || value.trim() === "") return fallback;
 	return value.trim().slice(0, maxLength);
 }
@@ -582,9 +578,7 @@ function cleanNullableText(value: unknown, maxLength: number): string | null {
 	return value.trim().slice(0, maxLength);
 }
 
-export function normalizeHeartbeatPayloads(
-	value: unknown,
-): Array<Record<string, unknown>> | null {
+export function normalizeHeartbeatPayloads(value: unknown): Array<Record<string, unknown>> | null {
 	if (value === null || typeof value !== "object" || Array.isArray(value)) {
 		return null;
 	}

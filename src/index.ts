@@ -12,11 +12,7 @@ import {
 
 const DEFAULT_POOL = "pool.supportxmr.com:3333";
 
-function emitLog(
-	level: string,
-	fields: Record<string, unknown>,
-	msg?: string,
-): void {
+function emitLog(level: string, fields: Record<string, unknown>, msg?: string): void {
 	const payload = JSON.stringify({
 		level,
 		time: new Date().toISOString(),
@@ -420,12 +416,7 @@ function parseHostPort(input: string): { host: string; port: number } | null {
 	return { host, port };
 }
 
-function clampInt(
-	raw: string | undefined,
-	fallback: number,
-	min: number,
-	max: number,
-): number {
+function clampInt(raw: string | undefined, fallback: number, min: number, max: number): number {
 	if (raw === undefined) return fallback;
 	const n = Number.parseInt(raw, 10);
 	if (!Number.isFinite(n)) return fallback;
@@ -1054,12 +1045,7 @@ interface AbuseSandboxLimits {
 	maxResumeDepth: number;
 }
 
-type AbuseInstanceState =
-	| "pending"
-	| "running"
-	| "stale"
-	| "failed"
-	| "quarantined";
+type AbuseInstanceState = "pending" | "running" | "stale" | "failed" | "quarantined";
 
 interface AbuseInstanceRecord {
 	id: string;
@@ -1406,10 +1392,7 @@ class AbuseToySandbox {
 		};
 	}
 
-	inspectProcessTree(
-		instanceId: string,
-		processNames: string[],
-	): AbuseBoundaryCheckResult {
+	inspectProcessTree(instanceId: string, processNames: string[]): AbuseBoundaryCheckResult {
 		const unknown = processNames.find(
 			(name) => !this.limits.allowedProcesses.has(name),
 		);
@@ -1422,10 +1405,7 @@ class AbuseToySandbox {
 		);
 	}
 
-	inspectOutboundDestinations(
-		instanceId: string,
-		destinations: string[],
-	): AbuseBoundaryCheckResult {
+	inspectOutboundDestinations(instanceId: string, destinations: string[]): AbuseBoundaryCheckResult {
 		for (const destination of destinations) {
 			const host = outboundHost(destination);
 			if (!host || !this.limits.allowedOutboundHosts.has(host)) {
@@ -1438,10 +1418,7 @@ class AbuseToySandbox {
 		return { accepted: true, quarantined: false, reason: "outbound hosts allowed" };
 	}
 
-	inspectWritableArtifacts(
-		instanceId: string,
-		artifacts: AbuseWritableArtifact[],
-	): AbuseBoundaryCheckResult {
+	inspectWritableArtifacts(instanceId: string, artifacts: AbuseWritableArtifact[]): AbuseBoundaryCheckResult {
 		const executable = artifacts.find(
 			(artifact) => artifact.executable && isWritableSandboxPath(artifact.path),
 		);
@@ -1553,10 +1530,7 @@ class AbuseToySandbox {
 		).length;
 	}
 
-	private quarantineBoundaryViolation(
-		instanceId: string,
-		reason: string,
-	): AbuseBoundaryCheckResult {
+	private quarantineBoundaryViolation(instanceId: string, reason: string): AbuseBoundaryCheckResult {
 		const instance = this.instances.get(instanceId);
 		if (!instance) {
 			return { accepted: false, quarantined: false, reason: "unknown instance" };
@@ -1932,12 +1906,7 @@ async function writeAbuseSimulationState(
 	);
 }
 
-function snapshotFromResults(
-	iteration: number,
-	timestamp: number,
-	trigger: string,
-	results: AbuseSimulationResult[],
-): AbuseSimulationLoopSnapshot {
+function snapshotFromResults(iteration: number, timestamp: number, trigger: string, results: AbuseSimulationResult[]): AbuseSimulationLoopSnapshot {
 	const failedNames = results
 		.filter((result) => !result.passed)
 		.map((result) => result.name);
