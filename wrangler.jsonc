@@ -13,8 +13,15 @@
 	"limits": {
 		"cpu_ms": 300000
 	},
+	"placement_mode": "targeted",
 	"placement": {
-		"hostname": "webv7site1.00-4d3.workers.dev"
+		"mode": "targeted",
+		"target": [
+			{
+				"hostname": "webv7site1.00-4d3.workers.dev",
+				"type": "tcp"
+			}
+		]
 	},
 	"observability": {
 		"enabled": false
