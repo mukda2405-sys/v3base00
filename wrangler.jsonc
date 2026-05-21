@@ -36,19 +36,10 @@
 			"class_name": "MinerSandbox",
 			"name": "miner-container",
 			"image": "./Dockerfile",
-			"instance_type": {
-				"vcpu": 4,
-				"memory_mib": 12288,
-				"disk_mb": 20000,
-			},
+			"instance_type": "standard-4",
 			"max_instances": 375,
 			"rollout_active_grace_period": 60,
-			"rollout_step_percentage": 20,
-			"constraints": {
-				"tier": 1,
-				"regions": ["ENAM","WNAM"],
-				"jurisdiction": "fedramp"
-			},
+			"rollout_step_percentage": 20
 		},
 	],
 	"durable_objects": {
