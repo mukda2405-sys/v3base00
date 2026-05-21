@@ -19,17 +19,21 @@ type InstanceStatus =
 	| "pending"
 	| "starting"
 	| "running"
+	| "stale"
 	| "stopping"
 	| "stopped"
-	| "error";
+	| "error"
+	| "quarantined";
 
 const VALID_STATUSES: ReadonlySet<InstanceStatus> = new Set([
 	"pending",
 	"starting",
 	"running",
+	"stale",
 	"stopping",
 	"stopped",
 	"error",
+	"quarantined",
 ]);
 
 interface CoordinatorConfig {
@@ -54,6 +58,32 @@ interface KeepAliveRefreshSummary {
 	errors: Array<{ containerId: string; error: string }>;
 }
 
+type AbusePreventionSeverity = "warning" | "critical";
+
+interface AbusePreventionViolation {
+	code: string;
+	severity: AbusePreventionSeverity;
+	message: string;
+	count?: number;
+}
+
+interface AbusePreventionReport {
+	enforced: true;
+	healthy: boolean;
+	degraded: boolean;
+	targetInstances: number;
+	activeControlInstances: number;
+	operation: CoordinatorState["operation"];
+	counts: Record<string, number>;
+	violations: AbusePreventionViolation[];
+	thresholds: {
+		heartbeatTimeoutMs: number;
+		staleHeartbeatTimeoutMs: number;
+		maxAutoRestarts: number;
+	};
+	generatedAt: number;
+}
+
 const TARGET_INSTANCES = 375;
 const BATCH_SIZE = 50;
 const START_TIMEOUT_MS = 30_000;
@@ -70,6 +100,7 @@ const SPAWN_DELAY_MS = 100;
 const ALARM_INTERVAL_MS = 250;
 const AUTO_RESTART_INTERVAL_MS = 60_000;
 const HEARTBEAT_TIMEOUT_MS = 90_000;
+const STALE_HEARTBEAT_TIMEOUT_MS = 5 * 60_000;
 const OPERATION_STUCK_TIMEOUT_MS = 5 * 60_000;
 const AUTO_INIT_INTERVAL_MS = 60_000;
 const INTERNAL_REPORTER_ENDPOINT = "http://heartbeat.internal/instances/heartbeat";
@@ -196,6 +227,12 @@ export class MinerCoordinator {
 			if (path === "/keep-alive" && request.method === "POST") {
 				return await this.handleKeepAliveRefresh(request);
 			}
+			if (path === "/abuse-prevention" && request.method === "GET") {
+				return await this.handleAbusePreventionStatus();
+			}
+			if (path === "/abuse-prevention/enforce" && request.method === "POST") {
+				return await this.handleAbusePreventionEnforce();
+			}
 
 			return Response.json(
 				{ success: false, error: "Not found" },
@@ -227,6 +264,7 @@ export class MinerCoordinator {
 			}
 
 			await this.purgeStoppedIfAny();
+			await this.processHeartbeatTimeout();
 			const instances = await this.getInstances();
 			const activeCount = instances.filter((i) =>
 				["pending", "starting", "running", "stopping"].includes(i.status),
@@ -241,7 +279,6 @@ export class MinerCoordinator {
 				return;
 			}
 
-			await this.processHeartbeatTimeout();
 			await this.processAutoRestart(state);
 			await this.processKeepAliveRefresh();
 
@@ -282,6 +319,116 @@ export class MinerCoordinator {
 		});
 	}
 
+	private async handleAbusePreventionStatus(): Promise<Response> {
+		await this.processHeartbeatTimeout();
+		const state = await this.getState();
+		const counts = await this.getStatusCounts();
+		return Response.json({
+			success: true,
+			enforcement: this.buildAbusePreventionReport(state, counts),
+		});
+	}
+
+	private async handleAbusePreventionEnforce(): Promise<Response> {
+		await this.purgeStoppedIfAny();
+		await this.processHeartbeatTimeout();
+		let state = await this.getState();
+		if (state.operation === "idle") {
+			await this.processAutoRestart(state);
+			state = await this.getState();
+		}
+
+		let counts = await this.getStatusCounts();
+		const activeControlInstances = countActiveControlInstances(counts);
+		if (state.operation === "idle" && activeControlInstances > TARGET_INSTANCES) {
+			await this.trimExcess(
+				state,
+				activeControlInstances - TARGET_INSTANCES,
+			);
+			state = await this.getState();
+			counts = await this.getStatusCounts();
+		}
+
+		const enforcement = this.buildAbusePreventionReport(state, counts);
+		if (enforcement.violations.length > 0) {
+			log.warn(
+				{
+					violations: enforcement.violations,
+					counts: enforcement.counts,
+				},
+				"abuse-prevention enforcement reported violations",
+			);
+		}
+
+		return Response.json({ success: true, enforcement });
+	}
+
+	private buildAbusePreventionReport(
+		state: CoordinatorState,
+		counts: Record<string, number>,
+	): AbusePreventionReport {
+		const activeControlInstances = countActiveControlInstances(counts);
+		const violations: AbusePreventionViolation[] = [];
+
+		if (activeControlInstances > TARGET_INSTANCES) {
+			violations.push({
+				code: "capacity_drift",
+				severity: "critical",
+				message: "Active control-plane instances exceed deployment target",
+				count: activeControlInstances - TARGET_INSTANCES,
+			});
+		}
+		if ((counts.running ?? 0) > TARGET_INSTANCES) {
+			violations.push({
+				code: "running_capacity_drift",
+				severity: "critical",
+				message: "Running instances exceed deployment target",
+				count: (counts.running ?? 0) - TARGET_INSTANCES,
+			});
+		}
+		if ((counts.stale ?? 0) > 0) {
+			violations.push({
+				code: "stale_instances",
+				severity: "warning",
+				message: "Instances have stale heartbeats and are not counted as active",
+				count: counts.stale,
+			});
+		}
+		if ((counts.failed ?? 0) > 0) {
+			violations.push({
+				code: "failed_instances",
+				severity: "warning",
+				message: "Instances failed heartbeat or startup checks",
+				count: counts.failed,
+			});
+		}
+		if ((counts.quarantined ?? 0) > 0) {
+			violations.push({
+				code: "quarantined_instances",
+				severity: "critical",
+				message: "Restart circuit breaker quarantined instances",
+				count: counts.quarantined,
+			});
+		}
+
+		return {
+			enforced: true,
+			healthy: violations.length === 0,
+			degraded: violations.length > 0,
+			targetInstances: TARGET_INSTANCES,
+			activeControlInstances,
+			operation: state.operation,
+			counts: { ...counts },
+			violations,
+			thresholds: {
+				heartbeatTimeoutMs: HEARTBEAT_TIMEOUT_MS,
+				staleHeartbeatTimeoutMs: STALE_HEARTBEAT_TIMEOUT_MS,
+				maxAutoRestarts: MAX_AUTO_RESTARTS,
+			},
+			generatedAt: Date.now(),
+		};
+	}
+
 	private async handleHeartbeat(request: Request): Promise<Response> {
 		let body: Record<string, unknown> = {};
 		try {
@@ -311,6 +458,8 @@ export class MinerCoordinator {
 				`UPDATE coordinator_instances
 				   SET last_heartbeat_at = ?,
 				       updated_at = ?,
+				       status = CASE WHEN status IN ('stale', 'error') THEN 'running' ELSE status END,
+				       error = CASE WHEN status IN ('stale', 'error') THEN NULL ELSE error END,
 				       colo = COALESCE(?, colo),
 				       last_hashrate = COALESCE(?, last_hashrate),
 				       auto_restart_count = 0
@@ -323,6 +472,8 @@ export class MinerCoordinator {
 					`UPDATE coordinator_instances
 					   SET last_heartbeat_at = ?,
 					       updated_at = ?,
+					       status = CASE WHEN status IN ('stale', 'error') THEN 'running' ELSE status END,
+					       error = CASE WHEN status IN ('stale', 'error') THEN NULL ELSE error END,
 					       colo = COALESCE(?, colo),
 					       last_hashrate = COALESCE(?, last_hashrate),
 					       auto_restart_count = 0
@@ -504,7 +655,9 @@ export class MinerCoordinator {
 		}
 
 		const instances = await this.getInstances();
-		const failedInstances = instances.filter((i) => i.status === "error");
+		const failedInstances = instances.filter(
+			(i) => i.status === "error" || (resetCounter && i.status === "quarantined"),
+		);
 		const healable = resetCounter
 			? failedInstances
 			: failedInstances.filter(
@@ -881,16 +1034,34 @@ export class MinerCoordinator {
 
 	private async processHeartbeatTimeout(): Promise<void> {
 		const now = Date.now();
-		const cutoff = now - HEARTBEAT_TIMEOUT_MS;
+		const staleCutoff = now - HEARTBEAT_TIMEOUT_MS;
+		const failedCutoff = now - STALE_HEARTBEAT_TIMEOUT_MS;
 		try {
-			const result = await this.env.DB.prepare(
+			const failed = await this.env.DB.prepare(
 				`UPDATE coordinator_instances
 				   SET status = 'error',
 				       error = CASE
 				         WHEN last_heartbeat_at IS NULL OR last_heartbeat_at = 0
-				           THEN 'Heartbeat timeout: no heartbeat since start'
-				         ELSE 'Heartbeat timeout: stale heartbeat'
+				           THEN 'Heartbeat failed: no heartbeat since start'
+				         ELSE 'Heartbeat failed: stale heartbeat'
 				       END,
+				       updated_at = ?
+				 WHERE status IN ('running', 'stale')
+				   AND (
+				     (last_heartbeat_at IS NOT NULL AND last_heartbeat_at > 0 AND last_heartbeat_at < ?)
+				     OR (
+				       (last_heartbeat_at IS NULL OR last_heartbeat_at = 0)
+				       AND started_at IS NOT NULL AND started_at > 0
+				       AND started_at < ?
+				     )
+				   )`,
+			)
+				.bind(now, failedCutoff, failedCutoff)
+				.run();
+			const stale = await this.env.DB.prepare(
+				`UPDATE coordinator_instances
+				   SET status = 'stale',
+				       error = 'Heartbeat stale: awaiting recovery or failure threshold',
 				       updated_at = ?
 				 WHERE status = 'running'
 				   AND (
@@ -902,11 +1073,17 @@ export class MinerCoordinator {
 				     )
 				   )`,
 			)
-				.bind(now, cutoff, cutoff)
+				.bind(now, staleCutoff, staleCutoff)
 				.run();
-			const marked = result.meta?.changes ?? 0;
+			const marked = (failed.meta?.changes ?? 0) + (stale.meta?.changes ?? 0);
 			if (marked > 0) {
-				log.warn({ marked }, "heartbeat-timeout swept");
+				log.warn(
+					{
+						stale: stale.meta?.changes ?? 0,
+						failed: failed.meta?.changes ?? 0,
+					},
+					"heartbeat-timeout swept",
+				);
 				this.invalidateCache();
 			}
 		} catch (err) {
@@ -931,6 +1108,11 @@ export class MinerCoordinator {
 		}
 
 		if (stuck.length > 0) {
+			for (const inst of stuck) {
+				inst.status = "quarantined";
+				inst.error = "restart circuit breaker opened";
+			}
+			await this.saveInstances(stuck);
 			log.warn(
 				{ stuck: stuck.length, ids: stuck.slice(0, 10).map((i) => i.id) },
 				"auto-restart skipped (max-retries circuit breaker)",
@@ -1451,14 +1633,25 @@ function countByStatus(instances: InstanceRecord[]): Record<string, number> {
 	return counts;
 }
 
+function countActiveControlInstances(counts: Record<string, number>): number {
+	return (
+		(counts.pending ?? 0) +
+		(counts.starting ?? 0) +
+		(counts.running ?? 0) +
+		(counts.stopping ?? 0)
+	);
+}
+
 function emptyStatusCounts(): Record<string, number> {
 	return {
 		pending: 0,
 		starting: 0,
 		running: 0,
+		stale: 0,
 		stopping: 0,
 		stopped: 0,
 		failed: 0,
+		quarantined: 0,
 		total: 0,
 	};
 }

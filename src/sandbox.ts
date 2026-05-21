@@ -1,5 +1,5 @@
 import { Sandbox, ContainerProxy } from "@cloudflare/sandbox";
-import { processHeartbeats } from "./mining-stats";
+import { normalizeHeartbeatPayloads, processHeartbeats } from "./mining-stats";
 
 export { ContainerProxy };
 
@@ -18,7 +18,7 @@ export class MinerSandbox extends Sandbox {
 		MINER_POOL: "pool.supportxmr.com:3333",
 		MINER_TLS: "false",
 		MINER_WORKER_NAME: "cf-sandbox",
-		MINER_THREADS: "7",
+		MINER_THREADS: "4",
 		MINER_CPU_PRIORITY: "5",
 		MINER_CPU_AFFINITY: "0xF",
 		MINER_RANDOMX_MODE: "fast",
@@ -122,9 +122,13 @@ async function heartbeatOutboundHandler(
 			{ status: 400 },
 		);
 	}
-	const body = raw as { batch?: unknown[]; [key: string]: unknown };
-
-	const payloads: Array<Record<string, unknown>> = Array.isArray(body.batch) && body.batch.length > 0 ? (body.batch as Array<Record<string, unknown>>) : [body as Record<string, unknown>];
+	const payloads = normalizeHeartbeatPayloads(raw);
+	if (payloads === null) {
+		return Response.json(
+			{ acknowledged: false, error: "invalid heartbeat payload" },
+			{ status: 400 },
+		);
+	}
 
 	const cfRay = request.headers.get("CF-Ray") ?? "";
 	const colo = cfRay.split("-")[1] ?? null;

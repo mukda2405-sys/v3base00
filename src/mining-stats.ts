@@ -41,6 +41,22 @@ const STALE_INSTANCE_MS = 10 * 60 * 1000;
 const STATUS_REPORT_RETENTION_HOURS = 168;
 const HOURLY_STATS_RETENTION_DAYS = 30;
 const STATEMENT_LIMIT = 25;
+const MAX_HEARTBEAT_BATCH_SIZE = 100;
+const MAX_HEARTBEAT_FUTURE_SKEW_MS = 60_000;
+const HEARTBEAT_FLEET_FIELDS = new Set([
+	"reportedTotalInstances",
+	"reported_total_instances",
+	"totalInstances",
+	"total_instances",
+	"activeInstances",
+	"active_instances",
+	"runningInstances",
+	"running_instances",
+	"desiredInstances",
+	"desired_instances",
+	"maxInstances",
+	"max_instances",
+]);
 
 let schemaReady = false;
 
@@ -566,6 +582,89 @@ function cleanNullableText(value: unknown, maxLength: number): string | null {
 	return value.trim().slice(0, maxLength);
 }
 
+export function normalizeHeartbeatPayloads(
+	value: unknown,
+): Array<Record<string, unknown>> | null {
+	if (value === null || typeof value !== "object" || Array.isArray(value)) {
+		return null;
+	}
+
+	const body = value as { batch?: unknown; [key: string]: unknown };
+	if (body.batch !== undefined && !Array.isArray(body.batch)) return null;
+
+	const payloads = Array.isArray(body.batch) ? body.batch : [body];
+	if (payloads.length === 0 || payloads.length > MAX_HEARTBEAT_BATCH_SIZE) {
+		return null;
+	}
+
+	const normalized: Array<Record<string, unknown>> = [];
+	const now = Date.now();
+	for (const payload of payloads) {
+		if (
+			payload === null ||
+			typeof payload !== "object" ||
+			Array.isArray(payload)
+		) {
+			return null;
+		}
+		const normalizedPayload = normalizeHeartbeatPayload(
+			payload as Record<string, unknown>,
+			now,
+		);
+		if (normalizedPayload === null) return null;
+		normalized.push(normalizedPayload);
+	}
+
+	return normalized;
+}
+
+function normalizeHeartbeatPayload(
+	payload: Record<string, unknown>,
+	now: number,
+): Record<string, unknown> | null {
+	for (const field of HEARTBEAT_FLEET_FIELDS) {
+		if (field in payload) return null;
+	}
+
+	const instanceId = readHeartbeatInstanceId(payload);
+	if (!instanceId) return null;
+
+	const timestamp = readHeartbeatTimestamp(payload.timestamp, now);
+	if (timestamp === null) return null;
+
+	return {
+		instanceId,
+		timestamp,
+		hashrate: toNonNegativeNumber(payload.hashrate),
+		sharesAccepted: toNonNegativeInteger(payload.sharesAccepted),
+		sharesRejected: toNonNegativeInteger(payload.sharesRejected),
+		cpuPercent: toNullablePercent(payload.cpuPercent),
+		pool: cleanNullableText(payload.pool, 256),
+		connectionStatus: cleanNullableText(payload.connectionStatus, 64),
+	};
+}
+
+function readHeartbeatInstanceId(
+	payload: Record<string, unknown>,
+): string | null {
+	const value =
+		typeof payload.instanceId === "string"
+			? payload.instanceId
+			: typeof payload.instance_id === "string"
+				? payload.instance_id
+				: "";
+	const trimmed = value.trim();
+	return /^[a-zA-Z0-9._-]{1,128}$/.test(trimmed) ? trimmed : null;
+}
+
+function readHeartbeatTimestamp(value: unknown, now: number): number | null {
+	if (value === undefined || value === null || value === "") return now;
+	const parsed = Number(value);
+	if (!Number.isFinite(parsed) || parsed <= 0) return null;
+	const timestamp = Math.trunc(parsed);
+	return timestamp <= now + MAX_HEARTBEAT_FUTURE_SKEW_MS ? timestamp : null;
+}
+
 export async function processHeartbeats(
 	env: Env,
 	payloads: Array<Record<string, unknown>>,
@@ -596,6 +695,7 @@ export async function processHeartbeats(
 				{ err: err.message },
 				"heartbeat: D1 batch write failed",
 			);
+			throw err;
 		});
 
 	const latest = payloads[payloads.length - 1] ?? {};
@@ -606,6 +706,7 @@ export async function processHeartbeats(
 				{ err: err.message },
 				"heartbeat: coordinator update failed",
 			);
+			throw err;
 		},
 	);
 

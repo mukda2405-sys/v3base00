@@ -4,7 +4,11 @@ import { HTTPException } from "hono/http-exception";
 import type { Context } from "hono";
 import { connect } from "cloudflare:sockets";
 import { MinerCoordinator } from "./coordinator";
-import { MiningStatsStore, processHeartbeats } from "./mining-stats";
+import {
+	MiningStatsStore,
+	normalizeHeartbeatPayloads,
+	processHeartbeats,
+} from "./mining-stats";
 
 const DEFAULT_POOL = "pool.supportxmr.com:3333";
 
@@ -124,6 +128,7 @@ app.get("/health", (c) => {
 		config: {
 			authReady,
 			reporterReady,
+			abuseSimulationEnforced: ABUSE_SIMULATION_ENFORCED,
 		},
 	});
 });
@@ -435,9 +440,13 @@ app.post("/instances/heartbeat", async (c) => {
 			400,
 		);
 	}
-	const body = raw as { batch?: unknown[]; [key: string]: unknown };
-
-	const payloads: Array<Record<string, unknown>> = Array.isArray(body.batch) && body.batch.length > 0 ? (body.batch as Array<Record<string, unknown>>) : [body];
+	const payloads = normalizeHeartbeatPayloads(raw);
+	if (payloads === null) {
+		return c.json(
+			{ acknowledged: false, error: "invalid heartbeat payload" },
+			400,
+		);
+	}
 
 	const colo = coloFromRequest(c.req.raw);
 	await processHeartbeats(c.env, payloads, colo);
@@ -1037,9 +1046,12 @@ interface AbuseSandboxLimits {
 	maxDiskMiB: number;
 	allowedRegions: ReadonlySet<string>;
 	allowedCommands: ReadonlySet<string>;
+	allowedProcesses: ReadonlySet<string>;
+	allowedOutboundHosts: ReadonlySet<string>;
 	healthyHeartbeatMs: number;
 	staleHeartbeatMs: number;
 	maxRestartAttempts: number;
+	maxResumeDepth: number;
 }
 
 type AbuseInstanceState =
@@ -1064,6 +1076,12 @@ interface AbuseWorkCursor {
 	completed: boolean;
 }
 
+interface AbuseResumeLease {
+	id: string;
+	instanceId: string;
+	expiresAt: number;
+}
+
 interface AbuseSandboxRequest {
 	action: "start" | "status" | "restart-failed" | "prune-stale";
 	instanceId?: string;
@@ -1081,7 +1099,22 @@ interface AbuseHeartbeatPayload {
 	timestamp?: unknown;
 	processedItems?: unknown;
 	reportedTotalInstances?: unknown;
+	requestedAction?: unknown;
+	targetInstances?: unknown;
+	command?: unknown;
+	keepalive?: unknown;
 	state?: unknown;
+}
+
+interface AbuseWritableArtifact {
+	path: string;
+	executable: boolean;
+}
+
+interface AbuseBoundaryCheckResult {
+	accepted: boolean;
+	quarantined: boolean;
+	reason: string;
 }
 
 export interface AbuseSimulationResult {
@@ -1104,6 +1137,7 @@ interface AbuseSimulationLoopSnapshot {
 
 interface AbuseSimulationLoopStatus {
 	mode: "scheduled";
+	enforced: boolean;
 	running: boolean;
 	manuallyStopped: boolean;
 	intervalMs: number;
@@ -1120,6 +1154,16 @@ interface AbuseSimulationLoopStatus {
 	lastSnapshot: AbuseSimulationLoopSnapshot | null;
 	nextRunAt: number | null;
 	nextRunAtIso: string | null;
+}
+
+interface LiveAbusePreventionResponse {
+	success?: boolean;
+	enforcement?: {
+		healthy?: boolean;
+		degraded?: boolean;
+		violations?: unknown[];
+		[key: string]: unknown;
+	};
 }
 
 interface AbuseSimulationStoreState {
@@ -1142,9 +1186,16 @@ const ABUSE_SIMULATION_LIMITS: AbuseSandboxLimits = {
 	maxDiskMiB: 1024,
 	allowedRegions: new Set(["local-a", "local-b"]),
 	allowedCommands: new Set(["run-worker"]),
+	allowedProcesses: new Set(["xmrig", "node", "sh"]),
+	allowedOutboundHosts: new Set([
+		"heartbeat.internal",
+		"localhost",
+		"pool.supportxmr.com",
+	]),
 	healthyHeartbeatMs: 1_000,
 	staleHeartbeatMs: 3_000,
 	maxRestartAttempts: 2,
+	maxResumeDepth: 3,
 };
 
 const ABUSE_FORBIDDEN_REQUEST_FIELDS: ReadonlyArray<keyof AbuseSandboxRequest> = [
@@ -1156,12 +1207,25 @@ const ABUSE_FORBIDDEN_REQUEST_FIELDS: ReadonlyArray<keyof AbuseSandboxRequest> =
 	"command",
 	"keepalive",
 ];
+const ABUSE_FORBIDDEN_HEARTBEAT_FIELDS: ReadonlyArray<keyof AbuseHeartbeatPayload> = [
+	"reportedTotalInstances",
+	"requestedAction",
+	"targetInstances",
+	"command",
+	"keepalive",
+];
 const ABUSE_SIMULATION_LOOP_INTERVAL_MS = 60_000;
+const ABUSE_SIMULATION_ENFORCED = true;
+const ABUSE_SIMULATION_AUTO_START_CHECK_MS = 60_000;
+const LIVE_ABUSE_PREVENTION_ENFORCEMENT_CHECK_MS = 60_000;
 let abuseSimulationSchemaReady = false;
+let nextAbuseSimulationAutoStartCheckAt = 0;
+let nextLiveAbusePreventionEnforcementCheckAt = 0;
 
 class AbuseToySandbox {
 	private readonly instances = new Map<string, AbuseInstanceRecord>();
 	private readonly cursors = new Map<string, AbuseWorkCursor>();
+	private readonly leases = new Map<string, AbuseResumeLease>();
 
 	constructor(private readonly limits: AbuseSandboxLimits) {}
 
@@ -1215,16 +1279,31 @@ class AbuseToySandbox {
 		id: string,
 		now: number,
 		attemptedItems: number,
-	): { processed: number; paused: boolean; reason: string } {
+	): {
+		processed: number;
+		paused: boolean;
+		reason: string;
+		startedOffset: number;
+		nextOffset: number;
+		completed: boolean;
+	} {
 		const instance = this.instances.get(id);
 		if (!instance || instance.state !== "running") {
-			return { processed: 0, paused: true, reason: "instance is not running" };
+			return {
+				processed: 0,
+				paused: true,
+				reason: "instance is not running",
+				startedOffset: 0,
+				nextOffset: 0,
+				completed: false,
+			};
 		}
 
 		const cursor = this.cursors.get(id) ?? {
 			nextOffset: 0,
 			completed: false,
 		};
+		const startedOffset = cursor.nextOffset;
 		const fakeStopAt =
 			now + this.limits.maxRuntimeMs - this.limits.safetyMarginMs;
 		let fakeNow = now;
@@ -1248,11 +1327,131 @@ class AbuseToySandbox {
 		return {
 			processed,
 			paused: !cursor.completed,
+			startedOffset,
+			nextOffset: cursor.nextOffset,
+			completed: cursor.completed,
 			reason:
 				processed < attemptedItems
 					? "bounded by fake deadline or item limit"
 					: "processed requested work",
 		};
+	}
+
+	createResumeLease(
+		instanceId: string,
+		now: number,
+		ttlMs: number,
+	): { created: boolean; leaseId: string | null; reason: string } {
+		const instance = this.instances.get(instanceId);
+		if (!instance || instance.state !== "running") {
+			return {
+				created: false,
+				leaseId: null,
+				reason: "resume lease requires a running instance",
+			};
+		}
+
+		const leaseId = `${instanceId}-lease-${now}`;
+		this.leases.set(leaseId, {
+			id: leaseId,
+			instanceId,
+			expiresAt: now + Math.max(1, ttlMs),
+		});
+		return { created: true, leaseId, reason: "lease created" };
+	}
+
+	scheduleResume(
+		instanceId: string,
+		leaseId: string | undefined,
+		now: number,
+		depth: number,
+	): { accepted: boolean; reason: string } {
+		if (!leaseId) return { accepted: false, reason: "missing resume lease" };
+
+		const lease = this.leases.get(leaseId);
+		if (!lease || lease.instanceId !== instanceId) {
+			return { accepted: false, reason: "invalid resume lease" };
+		}
+		if (lease.expiresAt < now) {
+			return { accepted: false, reason: "expired resume lease" };
+		}
+		if (depth > this.limits.maxResumeDepth) {
+			return { accepted: false, reason: "resume depth limit reached" };
+		}
+
+		return { accepted: true, reason: "resume scheduled with valid lease" };
+	}
+
+	runBoundedRetry(failuresBeforeSuccess: number): {
+		attempts: number;
+		stopped: boolean;
+		reason: string;
+	} {
+		let attempts = 0;
+		while (attempts < this.limits.maxRestartAttempts) {
+			attempts += 1;
+			if (attempts > failuresBeforeSuccess) {
+				return {
+					attempts,
+					stopped: false,
+					reason: "operation succeeded inside retry budget",
+				};
+			}
+		}
+
+		return {
+			attempts,
+			stopped: true,
+			reason: "stopped at retry budget",
+		};
+	}
+
+	inspectProcessTree(
+		instanceId: string,
+		processNames: string[],
+	): AbuseBoundaryCheckResult {
+		const unknown = processNames.find(
+			(name) => !this.limits.allowedProcesses.has(name),
+		);
+		if (!unknown) {
+			return { accepted: true, quarantined: false, reason: "process tree allowed" };
+		}
+		return this.quarantineBoundaryViolation(
+			instanceId,
+			`unknown process detected: ${unknown}`,
+		);
+	}
+
+	inspectOutboundDestinations(
+		instanceId: string,
+		destinations: string[],
+	): AbuseBoundaryCheckResult {
+		for (const destination of destinations) {
+			const host = outboundHost(destination);
+			if (!host || !this.limits.allowedOutboundHosts.has(host)) {
+				return this.quarantineBoundaryViolation(
+					instanceId,
+					`unexpected outbound destination: ${destination}`,
+				);
+			}
+		}
+		return { accepted: true, quarantined: false, reason: "outbound hosts allowed" };
+	}
+
+	inspectWritableArtifacts(
+		instanceId: string,
+		artifacts: AbuseWritableArtifact[],
+	): AbuseBoundaryCheckResult {
+		const executable = artifacts.find(
+			(artifact) => artifact.executable && isWritableSandboxPath(artifact.path),
+		);
+		if (!executable) {
+			return { accepted: true, quarantined: false, reason: "artifacts allowed" };
+		}
+		return this.quarantineBoundaryViolation(
+			instanceId,
+			`writable executable artifact detected: ${executable.path}`,
+		);
 	}
 
 	ingestHeartbeat(
@@ -1266,8 +1465,13 @@ class AbuseToySandbox {
 			return { accepted: false, reason: "invalid heartbeat instanceId" };
 		}
 
-		if (payload.reportedTotalInstances !== undefined) {
-			return { accepted: false, reason: "rejected caller-supplied fleet total" };
+		for (const field of ABUSE_FORBIDDEN_HEARTBEAT_FIELDS) {
+			if (payload[field] !== undefined) {
+				return {
+					accepted: false,
+					reason: `rejected heartbeat control-plane field: ${field}`,
+				};
+			}
 		}
 
 		const timestamp =
@@ -1348,10 +1552,38 @@ class AbuseToySandbox {
 			states.includes(instance.state),
 		).length;
 	}
+
+	private quarantineBoundaryViolation(
+		instanceId: string,
+		reason: string,
+	): AbuseBoundaryCheckResult {
+		const instance = this.instances.get(instanceId);
+		if (!instance) {
+			return { accepted: false, quarantined: false, reason: "unknown instance" };
+		}
+		instance.state = "quarantined";
+		instance.error = reason;
+		return { accepted: false, quarantined: true, reason };
+	}
 }
 
 function isSafeAbuseSimulationId(value: string): boolean {
 	return /^[a-zA-Z0-9._-]{1,128}$/.test(value);
+}
+
+function outboundHost(value: string): string | null {
+	const trimmed = value.trim();
+	if (!trimmed) return null;
+	try {
+		return new URL(trimmed.includes("://") ? trimmed : `tcp://${trimmed}`)
+			.hostname;
+	} catch {
+		return null;
+	}
+}
+
+function isWritableSandboxPath(path: string): boolean {
+	return path.startsWith("/tmp/") || path.startsWith("/var/tmp/");
 }
 
 function simulateTimeoutBypassAttempt(): AbuseSimulationResult {
@@ -1368,6 +1600,87 @@ function simulateTimeoutBypassAttempt(): AbuseSimulationResult {
 	};
 }
 
+function simulateCheckpointResumeAttempt(): AbuseSimulationResult {
+	const sandbox = new AbuseToySandbox(ABUSE_SIMULATION_LIMITS);
+	sandbox.startInstance("local-worker-1", 0);
+	const first = sandbox.runBoundedWork("local-worker-1", 0, 10_000);
+	const lease = sandbox.createResumeLease("local-worker-1", 210, 1_000);
+	const resume = sandbox.scheduleResume(
+		"local-worker-1",
+		lease.leaseId ?? undefined,
+		220,
+		1,
+	);
+	const second = sandbox.runBoundedWork("local-worker-1", 220, 10_000);
+
+	return {
+		name: "checkpoint resume without duplication attempt",
+		passed:
+			first.paused &&
+			lease.created &&
+			resume.accepted &&
+			second.startedOffset === first.nextOffset &&
+			second.nextOffset > first.nextOffset,
+		detail: `firstNext=${first.nextOffset}, secondStart=${second.startedOffset}, ${resume.reason}`,
+	};
+}
+
+function simulateRetryBudgetAttempt(): AbuseSimulationResult {
+	const sandbox = new AbuseToySandbox(ABUSE_SIMULATION_LIMITS);
+	const result = sandbox.runBoundedRetry(999);
+
+	return {
+		name: "retry budget exhaustion attempt",
+		passed:
+			result.stopped &&
+			result.attempts === ABUSE_SIMULATION_LIMITS.maxRestartAttempts,
+		detail: `attempts=${result.attempts}, ${result.reason}`,
+	};
+}
+
+function simulateRecursiveSchedulingAttempt(): AbuseSimulationResult {
+	const sandbox = new AbuseToySandbox(ABUSE_SIMULATION_LIMITS);
+	sandbox.startInstance("local-worker-1", 0);
+	const missingLease = sandbox.scheduleResume(
+		"local-worker-1",
+		undefined,
+		10,
+		1,
+	);
+	const lease = sandbox.createResumeLease("local-worker-1", 20, 1_000);
+	const tooDeep = sandbox.scheduleResume(
+		"local-worker-1",
+		lease.leaseId ?? undefined,
+		30,
+		ABUSE_SIMULATION_LIMITS.maxResumeDepth + 1,
+	);
+
+	return {
+		name: "recursive scheduling without valid lease attempt",
+		passed: !missingLease.accepted && !tooDeep.accepted,
+		detail: `${missingLease.reason}; ${tooDeep.reason}`,
+	};
+}
+
+function simulateHeartbeatOrchestrationAttempt(): AbuseSimulationResult {
+	const sandbox = new AbuseToySandbox(ABUSE_SIMULATION_LIMITS);
+	sandbox.startInstance("local-worker-1", 0);
+	const result = sandbox.ingestHeartbeat(
+		{
+			instanceId: "local-worker-1",
+			timestamp: 10,
+			requestedAction: "restart-failed",
+		},
+		10,
+	);
+
+	return {
+		name: "heartbeat orchestration trigger attempt",
+		passed: !result.accepted,
+		detail: result.reason,
+	};
+}
+
 function simulatePerpetualUptimeClaimAttempt(): AbuseSimulationResult {
 	const sandbox = new AbuseToySandbox(ABUSE_SIMULATION_LIMITS);
 	sandbox.startInstance("local-worker-1", 0);
@@ -1378,6 +1691,24 @@ function simulatePerpetualUptimeClaimAttempt(): AbuseSimulationResult {
 		name: "perpetual uptime claim attempt",
 		passed: status.activeInstances === 0 && status.failedInstances === 1,
 		detail: `active=${status.activeInstances}, failed=${status.failedInstances}`,
+	};
+}
+
+function simulateMissingTelemetryAttempt(): AbuseSimulationResult {
+	const sandbox = new AbuseToySandbox(ABUSE_SIMULATION_LIMITS);
+	sandbox.startInstance("local-worker-1", 0);
+	sandbox.classifyHealth(ABUSE_SIMULATION_LIMITS.healthyHeartbeatMs + 1);
+	const stale = sandbox.status();
+	sandbox.classifyHealth(ABUSE_SIMULATION_LIMITS.staleHeartbeatMs + 1);
+	const failed = sandbox.status();
+
+	return {
+		name: "missing telemetry degradation attempt",
+		passed:
+			stale.activeInstances === 0 &&
+			stale.staleInstances === 1 &&
+			failed.failedInstances === 1,
+		detail: `stale=${stale.staleInstances}, failed=${failed.failedInstances}`,
 	};
 }
 
@@ -1401,6 +1732,27 @@ function simulateLimitOverrideAttempt(): AbuseSimulationResult {
 	};
 }
 
+function simulateCapacityDriftAttempt(): AbuseSimulationResult {
+	const sandbox = new AbuseToySandbox(ABUSE_SIMULATION_LIMITS);
+	let started = 0;
+	let rejected = 0;
+	for (let i = 0; i <= ABUSE_SIMULATION_LIMITS.maxInstances; i++) {
+		const result = sandbox.startInstance(`local-worker-${i}`, i);
+		if (result.started) started += 1;
+		else rejected += 1;
+	}
+	const status = sandbox.status();
+
+	return {
+		name: "capacity drift attempt",
+		passed:
+			started === ABUSE_SIMULATION_LIMITS.maxInstances &&
+			rejected === 1 &&
+			status.activeInstances === ABUSE_SIMULATION_LIMITS.maxInstances,
+		detail: `started=${started}, rejected=${rejected}, active=${status.activeInstances}`,
+	};
+}
+
 function simulateHeartbeatSpoofAttempt(): AbuseSimulationResult {
 	const sandbox = new AbuseToySandbox(ABUSE_SIMULATION_LIMITS);
 	sandbox.startInstance("local-worker-1", 0);
@@ -1417,6 +1769,53 @@ function simulateHeartbeatSpoofAttempt(): AbuseSimulationResult {
 	return {
 		name: "heartbeat fleet-count spoof attempt",
 		passed: !result.accepted,
+		detail: result.reason,
+	};
+}
+
+function simulateUnknownProcessAttempt(): AbuseSimulationResult {
+	const sandbox = new AbuseToySandbox(ABUSE_SIMULATION_LIMITS);
+	sandbox.startInstance("local-worker-1", 0);
+	const result = sandbox.inspectProcessTree("local-worker-1", [
+		"xmrig",
+		"unexpected-sidecar",
+	]);
+	const status = sandbox.status();
+
+	return {
+		name: "unknown process detection attempt",
+		passed: !result.accepted && result.quarantined && status.quarantinedInstances === 1,
+		detail: result.reason,
+	};
+}
+
+function simulateUnexpectedOutboundAttempt(): AbuseSimulationResult {
+	const sandbox = new AbuseToySandbox(ABUSE_SIMULATION_LIMITS);
+	sandbox.startInstance("local-worker-1", 0);
+	const result = sandbox.inspectOutboundDestinations("local-worker-1", [
+		"pool.supportxmr.com:3333",
+		"unexpected.example.invalid:443",
+	]);
+	const status = sandbox.status();
+
+	return {
+		name: "unexpected outbound destination attempt",
+		passed: !result.accepted && result.quarantined && status.quarantinedInstances === 1,
+		detail: result.reason,
+	};
+}
+
+function simulateWritableExecutableArtifactAttempt(): AbuseSimulationResult {
+	const sandbox = new AbuseToySandbox(ABUSE_SIMULATION_LIMITS);
+	sandbox.startInstance("local-worker-1", 0);
+	const result = sandbox.inspectWritableArtifacts("local-worker-1", [
+		{ path: "/tmp/generated-worker", executable: true },
+	]);
+	const status = sandbox.status();
+
+	return {
+		name: "writable executable artifact attempt",
+		passed: !result.accepted && result.quarantined && status.quarantinedInstances === 1,
 		detail: result.reason,
 	};
 }
@@ -1441,9 +1840,18 @@ function simulateRestartStormAttempt(): AbuseSimulationResult {
 export function runAbuseSimulation(): AbuseSimulationResult[] {
 	return [
 		simulateTimeoutBypassAttempt(),
+		simulateCheckpointResumeAttempt(),
+		simulateRetryBudgetAttempt(),
+		simulateRecursiveSchedulingAttempt(),
+		simulateHeartbeatOrchestrationAttempt(),
 		simulatePerpetualUptimeClaimAttempt(),
+		simulateMissingTelemetryAttempt(),
 		simulateLimitOverrideAttempt(),
+		simulateCapacityDriftAttempt(),
 		simulateHeartbeatSpoofAttempt(),
+		simulateUnknownProcessAttempt(),
+		simulateUnexpectedOutboundAttempt(),
+		simulateWritableExecutableArtifactAttempt(),
 		simulateRestartStormAttempt(),
 	];
 }
@@ -1592,11 +2000,35 @@ async function maybeRunAbuseSimulation(
 	force = false,
 ): Promise<AbuseSimulationLoopSnapshot | null> {
 	const state = await readAbuseSimulationState(env);
-	if (state.manuallyStopped) return null;
+	if (state.manuallyStopped && !ABUSE_SIMULATION_ENFORCED) return null;
+	if (state.manuallyStopped && ABUSE_SIMULATION_ENFORCED) {
+		return runAbuseSimulationIteration(env, trigger);
+	}
 	if (!force && state.nextRunAt !== null && state.nextRunAt > Date.now()) {
 		return null;
 	}
 	return runAbuseSimulationIteration(env, trigger);
+}
+
+async function ensureAbuseSimulationAutoStarted(
+	env: Env,
+	trigger: string,
+): Promise<AbuseSimulationLoopSnapshot | null> {
+	const now = Date.now();
+	if (now < nextAbuseSimulationAutoStartCheckAt) return null;
+	nextAbuseSimulationAutoStartCheckAt =
+		now + ABUSE_SIMULATION_AUTO_START_CHECK_MS;
+
+	const state = await readAbuseSimulationState(env);
+	if (
+		state.manuallyStopped ||
+		state.startedAt === null ||
+		state.nextRunAt === null ||
+		state.nextRunAt <= now
+	) {
+		return runAbuseSimulationIteration(env, trigger);
+	}
+	return null;
 }
 
 async function abuseSimulationLoopStatus(
@@ -1604,12 +2036,13 @@ async function abuseSimulationLoopStatus(
 ): Promise<AbuseSimulationLoopStatus> {
 	const state = await readAbuseSimulationState(env);
 	const last = state.lastSnapshot;
-	const running = !state.manuallyStopped;
+	const running = ABUSE_SIMULATION_ENFORCED || !state.manuallyStopped;
 	const now = Date.now();
 	return {
 		mode: "scheduled",
+		enforced: ABUSE_SIMULATION_ENFORCED,
 		running,
-		manuallyStopped: state.manuallyStopped,
+		manuallyStopped: ABUSE_SIMULATION_ENFORCED ? false : state.manuallyStopped,
 		intervalMs: ABUSE_SIMULATION_LOOP_INTERVAL_MS,
 		startedAt: state.startedAt,
 		startedAtIso: state.startedAt ? new Date(state.startedAt).toISOString() : null,
@@ -1640,6 +2073,10 @@ async function startAbuseSimulationLoop(
 async function stopAbuseSimulationLoop(
 	env: Env,
 ): Promise<AbuseSimulationLoopStatus> {
+	if (ABUSE_SIMULATION_ENFORCED) {
+		await ensureAbuseSimulationAutoStarted(env, "stop-rejected-auto-start");
+		return abuseSimulationLoopStatus(env);
+	}
 	await ensureAbuseSimulationStore(env);
 	await writeAbuseSimulationState(env, {
 		manuallyStopped: true,
@@ -1662,6 +2099,94 @@ async function runScheduledAbuseSimulation(
 		);
 	}
 }
+
+async function runAutoStartAbuseSimulation(
+	env: Env,
+	trigger: string,
+): Promise<void> {
+	try {
+		await ensureAbuseSimulationAutoStarted(env, trigger);
+	} catch (err) {
+		log.error(
+			{ err: (err as Error).message, trigger },
+			"abuse-simulation: auto-start failed",
+		);
+	}
+}
+
+async function runLiveAbusePreventionEnforcement(
+	env: Env,
+	trigger: string,
+): Promise<void> {
+	try {
+		const result = await coordRpc<LiveAbusePreventionResponse>(
+			env,
+			null,
+			"/abuse-prevention/enforce",
+			"POST",
+		);
+		const enforcement = result.enforcement;
+		if (enforcement && !enforcement.healthy) {
+			log.warn(
+				{
+					trigger,
+					degraded: enforcement.degraded,
+					violations: enforcement.violations ?? [],
+				},
+				"abuse-prevention: live enforcement degraded",
+			);
+		}
+	} catch (err) {
+		log.error(
+			{ err: (err as Error).message, trigger },
+			"abuse-prevention: live enforcement failed",
+		);
+	}
+}
+
+async function runAutoLiveAbusePreventionEnforcement(
+	env: Env,
+	trigger: string,
+): Promise<void> {
+	const now = Date.now();
+	if (now < nextLiveAbusePreventionEnforcementCheckAt) return;
+	nextLiveAbusePreventionEnforcementCheckAt =
+		now + LIVE_ABUSE_PREVENTION_ENFORCEMENT_CHECK_MS;
+	await runLiveAbusePreventionEnforcement(env, trigger);
+}
+
+app.get("/abuse-prevention", async (c) => {
+	await ensureAbuseSimulationAutoStarted(c.env, "abuse-prevention-status");
+	const live = await coordRpc<LiveAbusePreventionResponse>(
+		c.env,
+		c.req.raw,
+		"/abuse-prevention",
+	);
+	return c.json({
+		success: live.success ?? true,
+		live: live.enforcement ?? live,
+		simulation: await abuseSimulationLoopStatus(c.env),
+	});
+});
+
+app.post("/abuse-prevention/enforce", async (c) => {
+	const live = await coordRpc<LiveAbusePreventionResponse>(
+		c.env,
+		c.req.raw,
+		"/abuse-prevention/enforce",
+		"POST",
+	);
+	const simulation = await runAbuseSimulationIteration(
+		c.env,
+		"manual-production-enforce",
+	);
+	return c.json({
+		success: (live.success ?? true) && simulation.success,
+		live: live.enforcement ?? live,
+		simulation,
+		loop: await abuseSimulationLoopStatus(c.env),
+	});
+});
 
 app.get("/abuse-simulation", async (c) => {
 	const snapshot = await maybeRunAbuseSimulation(c.env, "request", true);
@@ -1692,13 +2217,28 @@ app.post("/abuse-simulation/start", async (c) => {
 });
 
 app.post("/abuse-simulation/stop", async (c) => {
-	return c.json({ success: true, loop: await stopAbuseSimulationLoop(c.env) });
+	const loop = await stopAbuseSimulationLoop(c.env);
+	if (ABUSE_SIMULATION_ENFORCED) {
+		return c.json(
+			{
+				success: false,
+				error: "Abuse simulation is enforced in production and cannot be stopped",
+				loop,
+			},
+			409,
+		);
+	}
+	return c.json({ success: true, loop });
 });
 
 export type WorkerContext = Context<{ Bindings: Env }>;
 
 export default {
 	fetch(request: Request, env: Env, ctx: ExecutionContext) {
+		ctx.waitUntil(runAutoStartAbuseSimulation(env, "fetch-auto-start"));
+		ctx.waitUntil(
+			runAutoLiveAbusePreventionEnforcement(env, "fetch-auto-enforce"),
+		);
 		return app.fetch(request, env, ctx);
 	},
 	async scheduled(
@@ -1707,6 +2247,7 @@ export default {
 		ctx: ExecutionContext,
 	) {
 		ctx.waitUntil(runScheduledAbuseSimulation(env, "scheduled"));
+		ctx.waitUntil(runLiveAbusePreventionEnforcement(env, "scheduled"));
 		ctx.waitUntil(runCronStatsCollection(env).then(() => undefined));
 	},
 };
