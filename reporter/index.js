@@ -3,10 +3,8 @@ const https = require("https");
 const fs = require("fs");
 
 const PORT = 8080;
-const REPORTER_INTERVAL =
-	parseInt(process.env.REPORTER_INTERVAL || "60", 10) * 1000;
-const STATS_INTERVAL =
-	parseInt(process.env.REPORTER_STATS_INTERVAL || "60", 10) * 1000;
+const REPORTER_INTERVAL = parseInt(process.env.REPORTER_INTERVAL || "60", 10) * 1000;
+const STATS_INTERVAL = parseInt(process.env.REPORTER_STATS_INTERVAL || "60", 10) * 1000;
 const ENDPOINT = process.env.REPORTER_ENDPOINT || "";
 const INSTANCE_ID = process.env.HOSTNAME || "unknown";
 const XMRIG_API_PORT = 8081;
