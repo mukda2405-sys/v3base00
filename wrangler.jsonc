@@ -58,7 +58,7 @@
 		{
 			"binding": "DB",
 			"database_name": "miner-metrics",
-			"database_id": "c8071a21-47b8-4302-a623-d300fca81758"
+			"database_id": "bd7b487f-5df4-4171-8c78-e5c07bddb241"
 		},
 	],
 	"analytics_engine_datasets": [
