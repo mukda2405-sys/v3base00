@@ -3,8 +3,10 @@ const https = require("https");
 const fs = require("fs");
 
 const PORT = 8080;
-const REPORTER_INTERVAL = parseInt(process.env.REPORTER_INTERVAL || "60", 10) * 1000;
-const STATS_INTERVAL = parseInt(process.env.REPORTER_STATS_INTERVAL || "60", 10) * 1000;
+const REPORTER_INTERVAL =
+	parseInt(process.env.REPORTER_INTERVAL || "60", 10) * 1000;
+const STATS_INTERVAL =
+	parseInt(process.env.REPORTER_STATS_INTERVAL || "60", 10) * 1000;
 const ENDPOINT = process.env.REPORTER_ENDPOINT || "";
 const INSTANCE_ID = process.env.HOSTNAME || "unknown";
 const XMRIG_API_PORT = 8081;
@@ -159,7 +161,7 @@ function readLogTail(path, maxBytes = 51200) {
 			text = text.substring(text.indexOf("\n") + 1);
 		}
 		return text;
-	} catch (err) {
+	} catch (_err) {
 		return null;
 	}
 }
@@ -304,8 +306,14 @@ function updateStats() {
 			console.error("[reporter] XMRig API error:", err.message);
 
 			cachedStats.connectionStatus = "api_unavailable";
-			cachedStats.poolState = logStats.poolState !== "unknown" ? logStats.poolState : cachedStats.poolState;
-			cachedStats.tlsStatus = logStats.tlsStatus !== "unknown" ? logStats.tlsStatus : cachedStats.tlsStatus;
+			cachedStats.poolState =
+				logStats.poolState !== "unknown"
+					? logStats.poolState
+					: cachedStats.poolState;
+			cachedStats.tlsStatus =
+				logStats.tlsStatus !== "unknown"
+					? logStats.tlsStatus
+					: cachedStats.tlsStatus;
 			if (logStats.lastError) {
 				cachedStats.lastError = logStats.lastError;
 				cachedStats.lastErrorTime = logStats.lastErrorTime;
@@ -588,9 +596,15 @@ server.listen(PORT, () => {
 	);
 });
 
-const statsInitialDelay = Math.min(Math.max(1000, STATS_INTERVAL - 1000), 5000 + stableJitterMs(5000));
+const statsInitialDelay = Math.min(
+	Math.max(1000, STATS_INTERVAL - 1000),
+	5000 + stableJitterMs(5000),
+);
 const reportJitterWindow = Math.max(1, REPORTER_INTERVAL - 10000);
-const reportInitialDelay = REPORTER_INTERVAL <= 10000 ? REPORTER_INTERVAL : 10000 + stableJitterMs(reportJitterWindow);
+const reportInitialDelay =
+	REPORTER_INTERVAL <= 10000
+		? REPORTER_INTERVAL
+		: 10000 + stableJitterMs(reportJitterWindow);
 
 setTimeout(() => {
 	updateStats();
