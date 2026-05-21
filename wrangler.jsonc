@@ -5,7 +5,6 @@
 	"compatibility_date": "2026-04-20",
 	"compatibility_flags": ["nodejs_compat"],
 	"account_id": "9d4c649792e9a519667b23c2ed616b3b",
-
 	"workers_dev": true,
 	"preview_urls": false,
 	"triggers": {
@@ -66,7 +65,6 @@
 			"database_id": "ee1f8046-b54f-42fb-8f96-817a49554e0e"
 		}
 	],
-
 	"analytics_engine_datasets": [
 		{
 			"binding": "HEARTBEATS",
