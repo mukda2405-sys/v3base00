@@ -15,17 +15,21 @@ interface InstanceRecord {
 	autoRestartCount: number;
 }
 
-type InstanceStatus = "pending" | "starting" | "running" | "stale" | "stopping" | "stopped" | "error" | "quarantined";
+type InstanceStatus =
+	| "pending"
+	| "starting"
+	| "running"
+	| "stopping"
+	| "stopped"
+	| "error";
 
 const VALID_STATUSES: ReadonlySet<InstanceStatus> = new Set([
 	"pending",
 	"starting",
 	"running",
-	"stale",
 	"stopping",
 	"stopped",
 	"error",
-	"quarantined",
 ]);
 
 interface CoordinatorConfig {
@@ -50,42 +54,11 @@ interface KeepAliveRefreshSummary {
 	errors: Array<{ containerId: string; error: string }>;
 }
 
-type AbusePreventionSeverity = "warning" | "critical";
-
-interface AbusePreventionViolation {
-	code: string;
-	severity: AbusePreventionSeverity;
-	message: string;
-	count?: number;
-}
-
-interface AbusePreventionReport {
-	enforced: true;
-	healthy: boolean;
-	degraded: boolean;
-	targetInstances: number;
-	activeControlInstances: number;
-	operation: CoordinatorState["operation"];
-	counts: Record<string, number>;
-	violations: AbusePreventionViolation[];
-	thresholds: {
-		heartbeatTimeoutMs: number;
-		staleHeartbeatTimeoutMs: number;
-		maxAutoRestarts: number;
-	};
-	generatedAt: number;
-}
-
-const TARGET_INSTANCES = 340;
-const BATCH_SIZE = 10;
-const START_INSTANCE_TIMEOUT_MS = 30_000;
-const START_PORT_READY_TIMEOUT_MS = 90_000;
-const START_POLL_INTERVAL_MS = 1_000;
-const START_TIMEOUT_MS = START_INSTANCE_TIMEOUT_MS + START_PORT_READY_TIMEOUT_MS + 5_000;
+const TARGET_INSTANCES = 375;
+const BATCH_SIZE = 50;
+const START_TIMEOUT_MS = 30_000;
 const SET_ENV_TIMEOUT_MS = 15_000;
 const KEEP_ALIVE_TIMEOUT_MS = 10_000;
-const CONTAINER_READY_PORT = 8080;
-const CONTAINER_PROVISIONING_RETRY_MS = 60_000;
 const KEEP_ALIVE_REFRESH_BATCH_SIZE = 50;
 const KEEP_ALIVE_REFRESH_INTERVAL_MS = 60_000;
 const KEEP_ALIVE_REFRESH_CURSOR_KEY = "keepAliveRefreshCursor";
@@ -97,7 +70,6 @@ const SPAWN_DELAY_MS = 100;
 const ALARM_INTERVAL_MS = 250;
 const AUTO_RESTART_INTERVAL_MS = 60_000;
 const HEARTBEAT_TIMEOUT_MS = 90_000;
-const STALE_HEARTBEAT_TIMEOUT_MS = 5 * 60_000;
 const OPERATION_STUCK_TIMEOUT_MS = 5 * 60_000;
 const AUTO_INIT_INTERVAL_MS = 60_000;
 const INTERNAL_REPORTER_ENDPOINT = "http://heartbeat.internal/instances/heartbeat";
@@ -119,11 +91,18 @@ function isValidPool(pool: string): boolean {
 	return Number.isFinite(port) && port >= 1 && port <= 65535;
 }
 
-function getOptimalPool(_colo: string | null | undefined, fallbackPool: string): string {
+function getOptimalPool(
+	_colo: string | null | undefined,
+	fallbackPool: string,
+): string {
 	return fallbackPool;
 }
 
-function withTimeout<T>(promise: Promise<T>, ms: number, context: string): Promise<T> {
+function withTimeout<T>(
+	promise: Promise<T>,
+	ms: number,
+	context: string,
+): Promise<T> {
 	return Promise.race([
 		promise,
 		new Promise<never>((_, reject) =>
@@ -139,16 +118,11 @@ function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function isTransientContainerProvisioningError(message: string): boolean {
-	const lower = message.toLowerCase();
-	return (
-		lower.includes("no container instance") ||
-		lower.includes("currently provisioning") ||
-		lower.includes("too many containers per second")
-	);
-}
-
-function emitLog(level: string, fields: Record<string, unknown>, msg?: string): void {
+function emitLog(
+	level: string,
+	fields: Record<string, unknown>,
+	msg?: string,
+): void {
 	const payload = JSON.stringify({
 		level,
 		time: new Date().toISOString(),
@@ -222,12 +196,6 @@ export class MinerCoordinator {
 			if (path === "/keep-alive" && request.method === "POST") {
 				return await this.handleKeepAliveRefresh(request);
 			}
-			if (path === "/abuse-prevention" && request.method === "GET") {
-				return await this.handleAbusePreventionStatus();
-			}
-			if (path === "/abuse-prevention/enforce" && request.method === "POST") {
-				return await this.handleAbusePreventionEnforce();
-			}
 
 			return Response.json(
 				{ success: false, error: "Not found" },
@@ -259,7 +227,6 @@ export class MinerCoordinator {
 			}
 
 			await this.purgeStoppedIfAny();
-			await this.processHeartbeatTimeout();
 			const instances = await this.getInstances();
 			const activeCount = instances.filter((i) =>
 				["pending", "starting", "running", "stopping"].includes(i.status),
@@ -274,6 +241,7 @@ export class MinerCoordinator {
 				return;
 			}
 
+			await this.processHeartbeatTimeout();
 			await this.processAutoRestart(state);
 			await this.processKeepAliveRefresh();
 
@@ -314,124 +282,6 @@ export class MinerCoordinator {
 		});
 	}
 
-	private async handleAbusePreventionStatus(): Promise<Response> {
-		await this.processHeartbeatTimeout();
-		const state = await this.getState();
-		const counts = await this.getStatusCounts();
-		return Response.json({
-			success: true,
-			enforcement: this.buildAbusePreventionReport(state, counts),
-		});
-	}
-
-	private async handleAbusePreventionEnforce(): Promise<Response> {
-		await this.purgeStoppedIfAny();
-		await this.processHeartbeatTimeout();
-		let state = await this.getState();
-		if (state.operation === "spawning") {
-			await this.processSpawnBatch(state);
-			state = await this.getState();
-		}
-		if (state.operation === "destroying") {
-			await this.processDestroyBatch(state);
-			state = await this.getState();
-		}
-		if (state.operation === "idle") {
-			await this.processAutoRestart(state);
-			state = await this.getState();
-		}
-
-		let counts = await this.getStatusCounts();
-		const activeControlInstances = countActiveControlInstances(counts);
-		if (state.operation === "idle" && activeControlInstances > TARGET_INSTANCES) {
-			await this.trimExcess(
-				state,
-				activeControlInstances - TARGET_INSTANCES,
-			);
-			state = await this.getState();
-			counts = await this.getStatusCounts();
-		}
-
-		const enforcement = this.buildAbusePreventionReport(state, counts);
-		if (enforcement.violations.length > 0) {
-			log.warn(
-				{
-					violations: enforcement.violations,
-					counts: enforcement.counts,
-				},
-				"abuse-prevention enforcement reported violations",
-			);
-		}
-
-		return Response.json({ success: true, enforcement });
-	}
-
-	private buildAbusePreventionReport(
-		state: CoordinatorState,
-		counts: Record<string, number>,
-	): AbusePreventionReport {
-		const activeControlInstances = countActiveControlInstances(counts);
-		const violations: AbusePreventionViolation[] = [];
-
-		if (activeControlInstances > TARGET_INSTANCES) {
-			violations.push({
-				code: "capacity_drift",
-				severity: "critical",
-				message: "Active control-plane instances exceed deployment target",
-				count: activeControlInstances - TARGET_INSTANCES,
-			});
-		}
-		if ((counts.running ?? 0) > TARGET_INSTANCES) {
-			violations.push({
-				code: "running_capacity_drift",
-				severity: "critical",
-				message: "Running instances exceed deployment target",
-				count: (counts.running ?? 0) - TARGET_INSTANCES,
-			});
-		}
-		if ((counts.stale ?? 0) > 0) {
-			violations.push({
-				code: "stale_instances",
-				severity: "warning",
-				message: "Instances have stale heartbeats and are not counted as active",
-				count: counts.stale,
-			});
-		}
-		if ((counts.failed ?? 0) > 0) {
-			violations.push({
-				code: "failed_instances",
-				severity: "warning",
-				message: "Instances failed heartbeat or startup checks",
-				count: counts.failed,
-			});
-		}
-		if ((counts.quarantined ?? 0) > 0) {
-			violations.push({
-				code: "quarantined_instances",
-				severity: "critical",
-				message: "Restart circuit breaker quarantined instances",
-				count: counts.quarantined,
-			});
-		}
-
-		return {
-			enforced: true,
-			healthy: violations.length === 0,
-			degraded: violations.length > 0,
-			targetInstances: TARGET_INSTANCES,
-			activeControlInstances,
-			operation: state.operation,
-			counts: { ...counts },
-			violations,
-			thresholds: {
-				heartbeatTimeoutMs: HEARTBEAT_TIMEOUT_MS,
-				staleHeartbeatTimeoutMs: STALE_HEARTBEAT_TIMEOUT_MS,
-				maxAutoRestarts: MAX_AUTO_RESTARTS,
-			},
-			generatedAt: Date.now(),
-		};
-	}
-
 	private async handleHeartbeat(request: Request): Promise<Response> {
 		let body: Record<string, unknown> = {};
 		try {
@@ -461,8 +311,6 @@ export class MinerCoordinator {
 				`UPDATE coordinator_instances
 				   SET last_heartbeat_at = ?,
 				       updated_at = ?,
-				       status = CASE WHEN status IN ('stale', 'error') THEN 'running' ELSE status END,
-				       error = CASE WHEN status IN ('stale', 'error') THEN NULL ELSE error END,
 				       colo = COALESCE(?, colo),
 				       last_hashrate = COALESCE(?, last_hashrate),
 				       auto_restart_count = 0
@@ -475,8 +323,6 @@ export class MinerCoordinator {
 					`UPDATE coordinator_instances
 					   SET last_heartbeat_at = ?,
 					       updated_at = ?,
-					       status = CASE WHEN status IN ('stale', 'error') THEN 'running' ELSE status END,
-					       error = CASE WHEN status IN ('stale', 'error') THEN NULL ELSE error END,
 					       colo = COALESCE(?, colo),
 					       last_hashrate = COALESCE(?, last_hashrate),
 					       auto_restart_count = 0
@@ -658,9 +504,7 @@ export class MinerCoordinator {
 		}
 
 		const instances = await this.getInstances();
-		const failedInstances = instances.filter(
-			(i) => i.status === "error" || (resetCounter && i.status === "quarantined"),
-		);
+		const failedInstances = instances.filter((i) => i.status === "error");
 		const healable = resetCounter
 			? failedInstances
 			: failedInstances.filter(
@@ -756,24 +600,10 @@ export class MinerCoordinator {
 
 	private async processSpawnBatch(state: CoordinatorState): Promise<void> {
 		const all = await this.getInstances();
-		const now = Date.now();
-		const allPending = all.filter((i) => i.status === "pending");
-		const pending = allPending.filter((i) => i.requestedAt <= now);
-		const nextPendingAt = allPending.reduce<number | null>((next, inst) => {
-			if (inst.requestedAt <= now) return next;
-			return next === null ? inst.requestedAt : Math.min(next, inst.requestedAt);
-		}, null);
-		log.info(
-			{ pending: pending.length, deferredPending: allPending.length - pending.length },
-			"spawn batch tick",
-		);
+		const pending = all.filter((i) => i.status === "pending");
+		log.info({ pending: pending.length }, "spawn batch tick");
 
 		if (pending.length === 0) {
-			if (nextPendingAt !== null) {
-				await this.state.storage.setAlarm(nextPendingAt);
-				log.info({ nextPendingAt }, "spawn batch waiting for deferred capacity retry");
-				return;
-			}
 			state.operation = "idle";
 			await this.saveState(state);
 			const runningCount = all.filter((i) => i.status === "running").length;
@@ -796,22 +626,12 @@ export class MinerCoordinator {
 		);
 		await this.saveInstances(batch);
 
-		const remainingPendingRows = (await this.getInstances()).filter(
+		const remainingPending = (await this.getInstances()).filter(
 			(i) => i.status === "pending",
-		);
-		if (remainingPendingRows.length > 0) {
-			const afterBatchNow = Date.now();
-			const dueRemaining = remainingPendingRows.some(
-				(i) => i.requestedAt <= afterBatchNow,
-			);
-			const nextAt = dueRemaining
-				? afterBatchNow + SPAWN_DELAY_MS
-				: Math.min(...remainingPendingRows.map((i) => i.requestedAt));
-			await this.state.storage.setAlarm(nextAt);
-			log.info(
-				{ remainingPending: remainingPendingRows.length, nextAt },
-				"spawn batch continues",
-			);
+		).length;
+		if (remainingPending > 0) {
+			await this.state.storage.setAlarm(Date.now() + SPAWN_DELAY_MS);
+			log.info({ remainingPending }, "spawn batch continues");
 		} else {
 			state.operation = "idle";
 			await this.saveState(state);
@@ -859,34 +679,25 @@ export class MinerCoordinator {
 				const id = this.env.MINER_CONTAINER.idFromName(inst.containerId);
 				const container = this.env.MINER_CONTAINER.get(id);
 				await this.enableContainerKeepAlive(inst.containerId, "pre-start");
-				const envVars = {
-					INSTANCE_ID: inst.containerId,
-					HOSTNAME: inst.containerId,
-					MINER_POOL: effectivePool,
-					MINER_WALLET: config.wallet,
-					MINER_ALGORITHM: config.algorithm,
-					MINER_WORKER_NAME: `${config.workerPrefix}-${inst.id}`,
-					REPORTER_ENDPOINT: INTERNAL_REPORTER_ENDPOINT,
-				};
 
 				await withTimeout(
-					container.setEnvVars(envVars),
+					container.setEnvVars({
+						INSTANCE_ID: inst.containerId,
+						HOSTNAME: inst.containerId,
+						MINER_POOL: effectivePool,
+						MINER_WALLET: config.wallet,
+						MINER_ALGORITHM: config.algorithm,
+						MINER_WORKER_NAME: `${config.workerPrefix}-${inst.id}`,
+						REPORTER_ENDPOINT: INTERNAL_REPORTER_ENDPOINT,
+					}),
 					SET_ENV_TIMEOUT_MS,
 					`container.setEnvVars(${inst.containerId})`,
 				);
 
 				await withTimeout(
-					container.startAndWaitForPorts({
-						ports: [CONTAINER_READY_PORT],
-						startOptions: { envVars },
-						cancellationOptions: {
-							instanceGetTimeoutMS: START_INSTANCE_TIMEOUT_MS,
-							portReadyTimeoutMS: START_PORT_READY_TIMEOUT_MS,
-							waitInterval: START_POLL_INTERVAL_MS,
-						},
-					}),
+					container.start(),
 					START_TIMEOUT_MS,
-					`container.startAndWaitForPorts(${inst.containerId})`,
+					`container.start(${inst.containerId})`,
 				);
 				const startedAt = Date.now();
 				await this.enableContainerKeepAlive(inst.containerId, "post-start");
@@ -916,19 +727,6 @@ export class MinerCoordinator {
 		inst.status = "error";
 		inst.error = lastError;
 		inst.retries = MAX_RETRIES;
-		if (lastError && isTransientContainerProvisioningError(lastError)) {
-			inst.status = "pending";
-			inst.requestedAt = Date.now() + CONTAINER_PROVISIONING_RETRY_MS;
-			log.warn(
-				{
-					container: inst.containerId,
-					err: lastError,
-					nextAttemptAt: inst.requestedAt,
-				},
-				"spawn deferred while container capacity provisions",
-			);
-			return;
-		}
 		log.error(
 			{ container: inst.containerId, err: lastError },
 			"spawn exhausted",
@@ -1083,34 +881,16 @@ export class MinerCoordinator {
 
 	private async processHeartbeatTimeout(): Promise<void> {
 		const now = Date.now();
-		const staleCutoff = now - HEARTBEAT_TIMEOUT_MS;
-		const failedCutoff = now - STALE_HEARTBEAT_TIMEOUT_MS;
+		const cutoff = now - HEARTBEAT_TIMEOUT_MS;
 		try {
-			const failed = await this.env.DB.prepare(
+			const result = await this.env.DB.prepare(
 				`UPDATE coordinator_instances
 				   SET status = 'error',
 				       error = CASE
 				         WHEN last_heartbeat_at IS NULL OR last_heartbeat_at = 0
-				           THEN 'Heartbeat failed: no heartbeat since start'
-				         ELSE 'Heartbeat failed: stale heartbeat'
+				           THEN 'Heartbeat timeout: no heartbeat since start'
+				         ELSE 'Heartbeat timeout: stale heartbeat'
 				       END,
-				       updated_at = ?
-				 WHERE status IN ('running', 'stale')
-				   AND (
-				     (last_heartbeat_at IS NOT NULL AND last_heartbeat_at > 0 AND last_heartbeat_at < ?)
-				     OR (
-				       (last_heartbeat_at IS NULL OR last_heartbeat_at = 0)
-				       AND started_at IS NOT NULL AND started_at > 0
-				       AND started_at < ?
-				     )
-				   )`,
-			)
-				.bind(now, failedCutoff, failedCutoff)
-				.run();
-			const stale = await this.env.DB.prepare(
-				`UPDATE coordinator_instances
-				   SET status = 'stale',
-				       error = 'Heartbeat stale: awaiting recovery or failure threshold',
 				       updated_at = ?
 				 WHERE status = 'running'
 				   AND (
@@ -1122,17 +902,11 @@ export class MinerCoordinator {
 				     )
 				   )`,
 			)
-				.bind(now, staleCutoff, staleCutoff)
+				.bind(now, cutoff, cutoff)
 				.run();
-			const marked = (failed.meta?.changes ?? 0) + (stale.meta?.changes ?? 0);
+			const marked = result.meta?.changes ?? 0;
 			if (marked > 0) {
-				log.warn(
-					{
-						stale: stale.meta?.changes ?? 0,
-						failed: failed.meta?.changes ?? 0,
-					},
-					"heartbeat-timeout swept",
-				);
+				log.warn({ marked }, "heartbeat-timeout swept");
 				this.invalidateCache();
 			}
 		} catch (err) {
@@ -1157,11 +931,6 @@ export class MinerCoordinator {
 		}
 
 		if (stuck.length > 0) {
-			for (const inst of stuck) {
-				inst.status = "quarantined";
-				inst.error = "restart circuit breaker opened";
-			}
-			await this.saveInstances(stuck);
 			log.warn(
 				{ stuck: stuck.length, ids: stuck.slice(0, 10).map((i) => i.id) },
 				"auto-restart skipped (max-retries circuit breaker)",
@@ -1334,39 +1103,12 @@ export class MinerCoordinator {
 			state.config.pool = DEFAULT_CONFIG.pool;
 			await this.saveState(state);
 		}
-		await this.ensureTargetCapacity(state);
 
 		const alarm = await this.state.storage.getAlarm();
 		if (alarm === null) {
 			await this.state.storage.setAlarm(Date.now() + ALARM_INTERVAL_MS);
 			log.info({}, "initial alarm armed");
 		}
-	}
-
-	private async ensureTargetCapacity(state: CoordinatorState): Promise<void> {
-		if (state.operation !== "idle") {
-			const alarm = await this.state.storage.getAlarm();
-			if (alarm === null) {
-				await this.state.storage.setAlarm(Date.now() + ALARM_INTERVAL_MS);
-				log.warn(
-					{ operation: state.operation },
-					"target-capacity: rearmed missing operation alarm",
-				);
-			}
-			return;
-		}
-
-		const instances = await this.getInstances();
-		const activeCount = instances.filter((i) =>
-			["pending", "starting", "running", "stopping"].includes(i.status),
-		).length;
-		if (activeCount >= TARGET_INSTANCES) return;
-
-		await this.replenish(state, TARGET_INSTANCES - activeCount);
-		log.info(
-			{ active: activeCount, target: TARGET_INSTANCES },
-			"target-capacity: auto-start scheduled",
-		);
 	}
 
 	private async ensureSchema(): Promise<void> {
@@ -1709,25 +1451,14 @@ function countByStatus(instances: InstanceRecord[]): Record<string, number> {
 	return counts;
 }
 
-function countActiveControlInstances(counts: Record<string, number>): number {
-	return (
-		(counts.pending ?? 0) +
-		(counts.starting ?? 0) +
-		(counts.running ?? 0) +
-		(counts.stopping ?? 0)
-	);
-}
-
 function emptyStatusCounts(): Record<string, number> {
 	return {
 		pending: 0,
 		starting: 0,
 		running: 0,
-		stale: 0,
 		stopping: 0,
 		stopped: 0,
 		failed: 0,
-		quarantined: 0,
 		total: 0,
 	};
 }
