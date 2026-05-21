@@ -3,7 +3,7 @@
 	"name": "web-v6-site-1",
 	"main": "src/index.ts",
 	"compatibility_date": "2026-04-20",
-	"compatibility_flags": ["nodejs_compat"],
+	"compatibility_flags": ["nodejs_compat_v2"],
 	"account_id": "9d4c649792e9a519667b23c2ed616b3b",
 	"workers_dev": true,
 	"preview_urls": false,
