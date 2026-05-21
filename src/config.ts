@@ -28,11 +28,7 @@ export const TUNING_DEFAULTS: CoordinatorTuning = {
 	logLevel: "info",
 };
 
-function intEnv(
-	name: string,
-	raw: string | undefined,
-	fallback: number,
-): number {
+function intEnv(name: string, raw: string | undefined, fallback: number): number {
 	if (raw === undefined || raw === "") return fallback;
 	const n = Number.parseInt(raw, 10);
 	if (!Number.isFinite(n) || n <= 0) {
@@ -94,9 +90,7 @@ export class ConfigManager {
 		};
 	}
 
-	static validate(
-		config: Partial<MinerConfig>,
-	): Array<{ field: string; error: string }> {
+	static validate(config: Partial<MinerConfig>): Array<{ field: string; error: string }> {
 		const errors: Array<{ field: string; error: string }> = [];
 
 		if (config.wallet !== undefined) {
