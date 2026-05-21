@@ -3,6 +3,8 @@ export interface MinerConfig {
 	pool: string;
 	algorithm: string;
 	workerPrefix: string;
+	targetInstances: number;
+	cpuLimit: number;
 }
 
 export interface CoordinatorTuning {
@@ -19,6 +21,8 @@ export const DEFAULTS: MinerConfig = {
 	pool: "pool.supportxmr.com:3333",
 	algorithm: "rx/0",
 	workerPrefix: "cf-sandbox",
+	targetInstances: 375,
+	cpuLimit: 4.0,
 };
 
 export const TUNING_DEFAULTS: CoordinatorTuning = {
@@ -28,7 +32,11 @@ export const TUNING_DEFAULTS: CoordinatorTuning = {
 	logLevel: "info",
 };
 
-function intEnv(name: string, raw: string | undefined, fallback: number): number {
+function intEnv(
+	name: string,
+	raw: string | undefined,
+	fallback: number,
+): number {
 	if (raw === undefined || raw === "") return fallback;
 	const n = Number.parseInt(raw, 10);
 	if (!Number.isFinite(n) || n <= 0) {
@@ -45,20 +53,6 @@ function strEnv(raw: string | undefined, fallback: string): string {
 	return trimmed === "" ? fallback : trimmed;
 }
 
-function isValidPool(pool: string): boolean {
-	const separator = pool.lastIndexOf(":");
-	if (separator <= 0 || separator === pool.length - 1) return false;
-
-	const host = pool.slice(0, separator);
-	const port = Number.parseInt(pool.slice(separator + 1), 10);
-	return (
-		/^[A-Za-z0-9.-]+$/.test(host) &&
-		Number.isFinite(port) &&
-		port >= 1 &&
-		port <= 65535
-	);
-}
-
 export class ConfigManager {
 	static fromEnv(env: Env): MinerConfig {
 		return {
@@ -66,6 +60,12 @@ export class ConfigManager {
 			pool: strEnv(env.MINER_POOL, DEFAULTS.pool),
 			algorithm: strEnv(env.MINER_ALGORITHM, DEFAULTS.algorithm),
 			workerPrefix: strEnv(env.MINER_WORKER_PREFIX, DEFAULTS.workerPrefix),
+			targetInstances: intEnv(
+				"TARGET_INSTANCES",
+				env.TARGET_INSTANCES,
+				DEFAULTS.targetInstances,
+			),
+			cpuLimit: DEFAULTS.cpuLimit,
 		};
 	}
 
@@ -90,7 +90,9 @@ export class ConfigManager {
 		};
 	}
 
-	static validate(config: Partial<MinerConfig>): Array<{ field: string; error: string }> {
+	static validate(
+		config: Partial<MinerConfig>,
+	): Array<{ field: string; error: string }> {
 		const errors: Array<{ field: string; error: string }> = [];
 
 		if (config.wallet !== undefined) {
@@ -108,8 +110,22 @@ export class ConfigManager {
 			}
 		}
 
-		if (config.pool !== undefined && !isValidPool(config.pool)) {
+		if (config.pool !== undefined && !/^[A-Za-z0-9.\-]+:\d+$/.test(config.pool)) {
 			errors.push({ field: "pool", error: "Invalid pool host:port format" });
+		}
+
+		if (config.targetInstances !== undefined && (config.targetInstances < 1 || config.targetInstances > 375)) {
+			errors.push({
+				field: "targetInstances",
+				error: "Must be between 1 and 375",
+			});
+		}
+
+		if (config.cpuLimit !== undefined && (config.cpuLimit < 0.1 || config.cpuLimit > 4.0)) {
+			errors.push({
+				field: "cpuLimit",
+				error: "Must be between 0.1 and 4.0 vCPU",
+			});
 		}
 
 		return errors;
