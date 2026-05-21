@@ -27,9 +27,9 @@ else
 	exit 1
 fi
 
-THREADS="${MINER_THREADS:-4}"
+THREADS="${MINER_THREADS:-7}"
 CPU_PRIORITY="${MINER_CPU_PRIORITY:-5}"
-CPU_AFFINITY="${MINER_CPU_AFFINITY:-0xF}"
+CPU_AFFINITY="${MINER_CPU_AFFINITY:-auto}"
 RANDOMX_MODE="${MINER_RANDOMX_MODE:-fast}"
 RANDOMX_1GB_PAGES="${MINER_RANDOMX_1GB_PAGES:-true}"
 RANDOMX_WRMSR="${MINER_RANDOMX_WRMSR:-false}"
@@ -117,7 +117,6 @@ sleep 2
 if ! kill -0 $XMRIG_PID 2>/dev/null; then
 	echo "[start] ERROR: XMRig exited within 2s (check /tmp/xmrig.stdout.log and /tmp/xmrig.log)" >> /tmp/start.log
 	tail -n 50 /tmp/xmrig.stdout.log >> /tmp/start.log 2>/dev/null || true
-	exit 1
 fi
 
 cd /app/reporter
