@@ -4,7 +4,8 @@
 	"main": "src/index.ts",
 	"compatibility_date": "2026-04-20",
 	"compatibility_flags": ["nodejs_compat"],
-	"account_id": "4d3ad4bef12a8150d5fdc29f5e15fc5c",
+	"account_id": "9d4c649792e9a519667b23c2ed616b3b",
+
 	"workers_dev": true,
 	"preview_urls": false,
 	"triggers": {
@@ -12,7 +13,7 @@
 	},
 	"limits": {
 		"cpu_ms": 300000,
-		"subrequests": 1000000
+		"subrequests": 10000
 	},
 	"placement": {
 		"mode": "targeted",
@@ -37,8 +38,8 @@
 				"disk_mb": 20000
 			},
 			"max_instances": 375,
-			"rollout_active_grace_period": 60,
-			"rollout_step_percentage": 20,
+			"rollout_active_grace_period": 900,
+			"rollout_step_percentage": 5,
 			"constraints": {
 				"tiers": [1],
 				"regions": ["EEUR", "WEUR"],
@@ -62,9 +63,10 @@
 		{
 			"binding": "DB",
 			"database_name": "miner-metrics",
-			"database_id": "cbbf8cb6-bcc0-45fd-a2c1-8d80fa57c8c0"
+			"database_id": "ee1f8046-b54f-42fb-8f96-817a49554e0e"
 		}
 	],
+
 	"analytics_engine_datasets": [
 		{
 			"binding": "HEARTBEATS",
