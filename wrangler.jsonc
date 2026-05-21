@@ -36,11 +36,10 @@
 				"memory_mib": 12288,
 				"disk_mb": 20000
 			},
-			"max_instances": 375,
+			"max_instances": 340,
 			"rollout_active_grace_period": 900,
 			"rollout_step_percentage": 5,
 			"constraints": {
-				"tiers": [1],
 				"regions": ["EEUR", "WEUR"],
 				"jurisdiction": "eu"
 			}
@@ -62,7 +61,7 @@
 		{
 			"binding": "DB",
 			"database_name": "miner-metrics",
-			"database_id": "2bf5f280-5f7a-4af9-a1a7-b72e6ed54b59"
+			"database_id": "ee1f8046-b54f-42fb-8f96-817a49554e0e"
 		}
 	],
 	"analytics_engine_datasets": [

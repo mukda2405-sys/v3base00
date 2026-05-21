@@ -117,6 +117,7 @@ sleep 2
 if ! kill -0 $XMRIG_PID 2>/dev/null; then
 	echo "[start] ERROR: XMRig exited within 2s (check /tmp/xmrig.stdout.log and /tmp/xmrig.log)" >> /tmp/start.log
 	tail -n 50 /tmp/xmrig.stdout.log >> /tmp/start.log 2>/dev/null || true
+	exit 1
 fi
 
 cd /app/reporter

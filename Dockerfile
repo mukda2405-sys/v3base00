@@ -16,8 +16,8 @@ RUN git clone --depth 1 https://github.com/xmrig/xmrig.git . \
     && mkdir build && cd build \
     && cmake .. \
         -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_C_FLAGS="-O3 -march=x86-64-v3 -mtune=generic -flto -funroll-loops -fno-plt -fomit-frame-pointer" \
-        -DCMAKE_CXX_FLAGS="-O3 -march=x86-64-v3 -mtune=generic -flto -funroll-loops -fno-plt -fomit-frame-pointer" \
+        -DCMAKE_C_FLAGS="-O3 -march=x86-64 -mtune=generic -flto -funroll-loops -fno-plt -fomit-frame-pointer" \
+        -DCMAKE_CXX_FLAGS="-O3 -march=x86-64 -mtune=generic -flto -funroll-loops -fno-plt -fomit-frame-pointer" \
         -DCMAKE_EXE_LINKER_FLAGS="-flto -Wl,-O1,--as-needed" \
         -DWITH_OPENCL=OFF \
         -DWITH_CUDA=OFF \
@@ -71,7 +71,7 @@ ENV MINER_THREADS=4
 ENV MINER_CPU_PRIORITY=5
 ENV MINER_CPU_AFFINITY=0xF
 ENV MINER_RANDOMX_MODE=fast
-ENV MINER_RANDOMX_1GB_PAGES=true
+ENV MINER_RANDOMX_1GB_PAGES=false
 ENV MINER_RANDOMX_WRMSR=false
 ENV MINER_RANDOMX_CACHE_QOS=true
 ENV MINER_HUGE_PAGES_JIT=true
