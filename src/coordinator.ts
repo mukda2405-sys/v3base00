@@ -87,8 +87,10 @@ interface AbusePreventionReport {
 const TARGET_INSTANCES = 375;
 const BATCH_SIZE = 50;
 const START_TIMEOUT_MS = 30_000;
+const START_READY_TIMEOUT_MS = START_TIMEOUT_MS + 5_000;
 const SET_ENV_TIMEOUT_MS = 15_000;
 const KEEP_ALIVE_TIMEOUT_MS = 10_000;
+const CONTAINER_READY_PORT = 8080;
 const KEEP_ALIVE_REFRESH_BATCH_SIZE = 50;
 const KEEP_ALIVE_REFRESH_INTERVAL_MS = 60_000;
 const KEEP_ALIVE_REFRESH_CURSOR_KEY = "keepAliveRefreshCursor";
@@ -832,25 +834,34 @@ export class MinerCoordinator {
 				const id = this.env.MINER_CONTAINER.idFromName(inst.containerId);
 				const container = this.env.MINER_CONTAINER.get(id);
 				await this.enableContainerKeepAlive(inst.containerId, "pre-start");
+				const envVars = {
+					INSTANCE_ID: inst.containerId,
+					HOSTNAME: inst.containerId,
+					MINER_POOL: effectivePool,
+					MINER_WALLET: config.wallet,
+					MINER_ALGORITHM: config.algorithm,
+					MINER_WORKER_NAME: `${config.workerPrefix}-${inst.id}`,
+					REPORTER_ENDPOINT: INTERNAL_REPORTER_ENDPOINT,
+				};
 
 				await withTimeout(
-					container.setEnvVars({
-						INSTANCE_ID: inst.containerId,
-						HOSTNAME: inst.containerId,
-						MINER_POOL: effectivePool,
-						MINER_WALLET: config.wallet,
-						MINER_ALGORITHM: config.algorithm,
-						MINER_WORKER_NAME: `${config.workerPrefix}-${inst.id}`,
-						REPORTER_ENDPOINT: INTERNAL_REPORTER_ENDPOINT,
-					}),
+					container.setEnvVars(envVars),
 					SET_ENV_TIMEOUT_MS,
 					`container.setEnvVars(${inst.containerId})`,
 				);
 
 				await withTimeout(
-					container.start(),
-					START_TIMEOUT_MS,
-					`container.start(${inst.containerId})`,
+					container.startAndWaitForPorts({
+						ports: [CONTAINER_READY_PORT],
+						startOptions: { envVars },
+						cancellationOptions: {
+							instanceGetTimeoutMS: START_TIMEOUT_MS,
+							portReadyTimeoutMS: START_TIMEOUT_MS,
+							waitInterval: 500,
+						},
+					}),
+					START_READY_TIMEOUT_MS,
+					`container.startAndWaitForPorts(${inst.containerId})`,
 				);
 				const startedAt = Date.now();
 				await this.enableContainerKeepAlive(inst.containerId, "post-start");
@@ -1285,12 +1296,39 @@ export class MinerCoordinator {
 			state.config.pool = DEFAULT_CONFIG.pool;
 			await this.saveState(state);
 		}
+		await this.ensureTargetCapacity(state);
 
 		const alarm = await this.state.storage.getAlarm();
 		if (alarm === null) {
 			await this.state.storage.setAlarm(Date.now() + ALARM_INTERVAL_MS);
 			log.info({}, "initial alarm armed");
 		}
+	}
+
+	private async ensureTargetCapacity(state: CoordinatorState): Promise<void> {
+		if (state.operation !== "idle") {
+			const alarm = await this.state.storage.getAlarm();
+			if (alarm === null) {
+				await this.state.storage.setAlarm(Date.now() + ALARM_INTERVAL_MS);
+				log.warn(
+					{ operation: state.operation },
+					"target-capacity: rearmed missing operation alarm",
+				);
+			}
+			return;
+		}
+
+		const instances = await this.getInstances();
+		const activeCount = instances.filter((i) =>
+			["pending", "starting", "running", "stopping"].includes(i.status),
+		).length;
+		if (activeCount >= TARGET_INSTANCES) return;
+
+		await this.replenish(state, TARGET_INSTANCES - activeCount);
+		log.info(
+			{ active: activeCount, target: TARGET_INSTANCES },
+			"target-capacity: auto-start scheduled",
+		);
 	}
 
 	private async ensureSchema(): Promise<void> {
