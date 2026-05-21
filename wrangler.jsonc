@@ -15,8 +15,7 @@
 		"subrequests": 1000000
 	},
 	"placement": {
-		"mode": "targeted",
-		"hostname": "web-v6-site-1.00-4d3.workers.dev"
+		"mode": "smart"
 	},
 	"observability": {
 		"enabled": false
@@ -31,15 +30,10 @@
 			"class_name": "MinerSandbox",
 			"name": "miner-container",
 			"image": "./Dockerfile",
-			"instance_type": {
-				"vcpu": 4,
-				"memory_mib": 12288,
-				"disk_mb": 20000
-			},
-			"max_instances": 340,
-			"rollout_active_grace_period": 900,
-			"rollout_step_percentage": 5,
+			"instance_type": "standard-4",
+			"max_instances": 375,
 			"constraints": {
+				"tiers": [1],
 				"regions": ["EEUR", "WEUR"],
 				"jurisdiction": "eu"
 			}
